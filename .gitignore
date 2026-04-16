@@ -1,0 +1,87 @@
+# Go
+build/
+bin/
+obj/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+*.pdb
+
+# 依赖目录
+vendor/
+
+# Go 工作区文件
+go.work
+go.work.sum
+
+# 开发工具
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# 日志文件
+logs/
+*.log
+
+# 数据文件
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# 用户数据目录
+.crac_exam/
+
+# 前端
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/package-lock.json
+frontend/yarn.lock
+frontend/pnpm-lock.yaml
+
+# Wails
+wails-debug.log
+
+# 临时文件
+tmp/
+temp/
+*.tmp
+*.temp
+
+# 编译中间文件
+*.o
+*.a
+
+# 测试覆盖率
+coverage.txt
+*.cover
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+
+# 发布包
+release/
+
+# Windows 资源文件（编译生成）
+resource.syso
+
+# 版本信息文件（编译生成）
+versioninfo.json
+
+# 图标副本
+icon_copy.ico
+
+# 前端开发服务器
+frontend/.env.local
+frontend/.env.development.local
