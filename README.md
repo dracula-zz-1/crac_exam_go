@@ -566,12 +566,6 @@ export const NewService = {
 4. 推送到分支 (`git push origin feature/AmazingFeature`)
 5. 开启 Pull Request
 
-## 📮 联系方式
-
-- **项目地址**：<https://github.com/your-repo/crac_exam_go>
-- **问题反馈**：<https://github.com/your-repo/crac_exam_go/issues>
-- **邮箱**：<crac@example.com>
-
 ## 🙏 致谢
 
 感谢以下开源项目：

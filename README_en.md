@@ -566,12 +566,6 @@ Issues and Pull Requests are welcome!
 4. Push to the branch (`git push origin feature/AmazingFeature`)
 5. Open a Pull Request
 
-## 📮 Contact
-
-- **Project**: <https://github.com/your-repo/crac_exam_go>
-- **Issues**: <https://github.com/your-repo/crac_exam_go/issues>
-- **Email**: <crac@example.com>
-
 ## 🙏 Acknowledgments
 
 Thanks to the following open source projects:
