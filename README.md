@@ -185,7 +185,7 @@ crac_exam_go/
 
 ```bash
 # 1. 克隆项目
-git clone https://github.com/your-repo/crac_exam_go.git
+git clone https://github.com/dracula-zz-1/crac_exam_go.git
 cd crac_exam_go
 
 # 2. 安装 Wails CLI

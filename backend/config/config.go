@@ -22,10 +22,10 @@ func init() {
 	if err != nil {
 		homeDir = "."
 	}
-	
+
 	// 使用用户目录下的 .crac_exam 文件夹
 	baseDir := filepath.Join(homeDir, ".crac_exam")
-	
+
 	// 确保目录存在
 	os.MkdirAll(baseDir, os.ModePerm)
 	os.MkdirAll(filepath.Join(baseDir, "data"), os.ModePerm)

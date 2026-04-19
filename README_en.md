@@ -185,7 +185,7 @@ crac_exam_go/
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/your-repo/crac_exam_go.git
+git clone https://github.com/dracula-zz-1/crac_exam_go.git
 cd crac_exam_go
 
 # 2. Install Wails CLI
