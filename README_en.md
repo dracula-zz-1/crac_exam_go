@@ -2,6 +2,8 @@
 
 **An intelligent exam simulation platform for CRAC (China Radio Association) amateur radio enthusiasts**
 
+[🌐 English](README_en.md) | [🇨🇳 中文](README.md)
+
 [Features](#-features) • [Technology Stack](#-technology-stack) • [Installation](#-installation-and-usage) • [Development Guide](#-development-guide) • [FAQ](#-faq)
 
 ***

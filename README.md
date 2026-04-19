@@ -1,121 +1,123 @@
-# 业余无线电模拟考试系统
+# Amateur Radio Exam System
 
-**专为 CRAC 业余无线电爱好者打造的智能化模拟考试平台**
+**An intelligent exam simulation platform for CRAC (China Radio Association) amateur radio enthusiasts**
 
-[功能特性](#-功能特性) • [技术架构](#-技术架构) • [安装使用](#-安装与使用) • [开发指南](#-开发指南) • [常见问题](#-常见问题)
+[🌐 English](README_en.md) | [🇨🇳 中文](README.md)
+
+[Features](#-features) • [Technology Stack](#-technology-stack) • [Installation](#-installation-and-usage) • [Development Guide](#-development-guide) • [FAQ](#-faq)
 
 ***
 
-## 📖 项目简介
+## 📖 Introduction
 
-业余无线电模拟考试系统是一款专为中国无线电协会业余无线电分会（CRAC）设计的现代化考试辅助工具。系统支持 A/B/C 三类操作证书考试的完整功能，包括题库管理、模拟考试、错题收集、成绩统计等核心功能，帮助考生高效备考业余无线电操作证书考试。
+The Amateur Radio Exam System is a modern exam preparation tool designed for the China Radio Association Amateur Radio Branch (CRAC). The system supports complete functionality for A/B/C class operator certificate exams, including question bank management, mock exams, error collection, and score statistics, helping candidates efficiently prepare for amateur radio operator certificate exams.
 
-## ✨ 功能特性
+## ✨ Features
 
-### 🎯 核心功能
+### 🎯 Core Features
 
-#### 1. 题库管理
+#### 1. Question Bank Management
 
-- **多格式导入**：支持 PDF 题库文件一键导入，自动识别题目、答案
-- **智能分类**：自动识别并分类 A/B/C 三类题目
-- **题目类型**：支持单选题、多选题、判断题等多种题型
-- **图片支持**：支持含图题目，自动提取并保存题目图片
-- **批量操作**：支持批量删除、导出、搜索题目
+- **Multi-format Import**: One-click PDF question bank import with automatic recognition of questions and answers
+- **Smart Classification**: Automatically identifies and classifies A/B/C class questions
+- **Question Types**: Supports single-choice, multiple-choice, true/false questions
+- **Image Support**: Supports questions with images, automatically extracts and saves them
+- **Batch Operations**: Supports batch delete, export, and search questions
 
-#### 2. 在线练习
+#### 2. Online Practice
 
-- **逐题练习**：按类别选择题目，逐题作答并即时反馈
-- **错题强化**：自动收集错题，针对性强化练习
-- **收藏功能**：支持收藏重点题目，方便重点复习
-- **进度保存**：自动保存练习进度，随时继续学习
+- **Question-by-Question Practice**: Select questions by category, answer one by one with instant feedback
+- **Error Reinforcement**: Automatically collects wrong answers for targeted practice
+- **Favorites**: Bookmark important questions for focused review
+- **Progress Saving**: Automatically saves practice progress, continue anytime
 
-#### 3. 模拟考试
+#### 3. Mock Exam
 
-- **真实模拟**：完全按照真实考试题型和题量组卷
-  - A 类：32 道单选 + 8 道多选，40 题/40 分钟，30 题通过
-  - B 类：45 道单选 + 15 道多选，60 题/60 分钟，45 题通过
-  - C 类：70 道单选 + 20 道多选，90 题/90 分钟，70 题通过
-- **智能组卷**：随机抽题，确保每次考试题目不同
-- **计时功能**：实时显示剩余时间，时间到自动交卷
-- **即时评分**：交卷后立即显示成绩和正确答案
+- **Real Simulation**: Completely follows real exam question types and counts
+  - Class A: 32 single-choice + 8 multiple-choice, 40 questions/40 minutes, 30 correct to pass
+  - Class B: 45 single-choice + 15 multiple-choice, 60 questions/60 minutes, 45 correct to pass
+  - Class C: 70 single-choice + 20 multiple-choice, 90 questions/90 minutes, 70 correct to pass
+- **Smart Paper Generation**: Random question selection ensures different questions each time
+- **Timer**: Real-time countdown with automatic submission when time expires
+- **Instant Scoring**: Shows score and correct answers immediately after submission
 
-#### 4. 学习统计
+#### 4. Learning Statistics
 
-- **成绩趋势图**：可视化展示考试成绩变化趋势
-- **分类统计**：按 A/B/C 类分别统计练习和考试情况
-- **错题分析**：统计错题数量和分布，针对性复习
-- **时间范围**：支持近 7 天、近半年、近一年、全部时间范围
+- **Score Trend Chart**: Visual display of exam score changes
+- **Category Statistics**: Separate statistics for A/B/C class practice and exams
+- **Error Analysis**: Statistics on error count and distribution for targeted review
+- **Time Range**: Supports last 7 days, last half year, last year, all time range
 
-### 🌟 产品亮点
+### 🌟 Highlights
 
-1. **智能化**：PDF 题库自动识别，无需手动录入
-2. **专业化**：完全符合 CRAC 考试大纲和题型要求
-3. **人性化**：错题本、收藏夹、进度保存等贴心功能
-4. **可视化**：成绩趋势图表，学习进度一目了然
-5. **本地化**：所有数据本地存储，保护隐私安全
-6. **绿色化**：单文件运行，无需安装，不写注册表
+1. **Intelligent**: Automatic PDF question bank recognition, no manual entry needed
+2. **Professional**: Fully complies with CRAC exam syllabus and question type requirements
+3. **User-friendly**: Thoughtful features like error book, favorites, progress saving
+4. **Visual**: Score trend charts, learning progress at a glance
+5. **Local**: All data stored locally, protecting privacy and security
+6. **Portable**: Single file execution, no installation required, no registry writes
 
-## 💻 技术架构
+## 💻 Technology Stack
 
-### 技术栈
+### Tech Stack
 
-#### 后端技术
+#### Backend
 
-- **开发语言**：Go 1.26.1
-- **桌面框架**：[Wails v2.12.0](https://wails.io/) - 现代化的 Go 桌面应用框架
-- **数据库**：SQLite (glebarez/sqlite - 纯 Go 实现，无需 CGO)
-- **日志系统**：Logrus + Lumberjack (支持日志轮转)
-- **PDF 处理**：
-  - 文本提取：go-fitz (基于 MuPDF)
-  - 图片提取：unipdf (oliverpolkerton fork)
-- **依赖管理**：Go Modules
+- **Language**: Go 1.26.1
+- **Desktop Framework**: [Wails v2.12.0](https://wails.io/) - Modern Go desktop application framework
+- **Database**: SQLite (glebarez/sqlite - Pure Go implementation, no CGO required)
+- **Logging**: Logrus + Lumberjack (supports log rotation)
+- **PDF Processing**:
+  - Text Extraction: go-fitz (based on MuPDF)
+  - Image Extraction: unipdf (oliverpolkerton fork)
+- **Dependency Management**: Go Modules
 
-#### 前端技术
+#### Frontend
 
-- **核心框架**：Vue 3.5.13 (Composition API)
-- **UI 组件库**：Element Plus 2.9.6
-- **状态管理**：Pinia 3.0.0
-- **路由管理**：Vue Router 4.5.0
-- **构建工具**：Vite 5.4.21
-- **图表库**：ECharts 5.6.0
-- **图标库**：@element-plus/icons-vue
-- **开发语言**：TypeScript 5.8.3
+- **Framework**: Vue 3.5.13 (Composition API)
+- **UI Library**: Element Plus 2.9.6
+- **State Management**: Pinia 3.0.0
+- **Router**: Vue Router 4.5.0
+- **Build Tool**: Vite 5.4.21
+- **Chart Library**: ECharts 5.6.0
+- **Icons**: @element-plus/icons-vue
+- **Language**: TypeScript 5.8.3
 
-#### 系统架构
+#### Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                     前端层 (Vue 3)                       │
+│                     Frontend Layer (Vue 3)              │
 │  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐   │
-│  │ 首页    │  │ 题库    │  │ 练习    │  │ 考试    │   │
+│  │ Home    │  │ Question│  │ Practice│  │ Exam    │   │
 │  └─────────┘  └─────────┘  └─────────┘  └─────────┘   │
 │  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐   │
-│  │ 错题本  │  │ 收藏夹  │  │ 统计    │  │ 设置    │   │
+│  │ Errors  │  │ Favorites│ │ Stats   │  │ Settings│   │
 │  └─────────┘  └─────────┘  └─────────┘  └─────────┘   │
 └─────────────────────────────────────────────────────────┘
                           ↕ Wails Runtime
 ┌─────────────────────────────────────────────────────────┐
-│                    服务层 (Go)                           │
+│                    Service Layer (Go)                    │
 │  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐   │
-│  │ 题库    │  │ 练习    │  │ 考试    │  │ 统计    │   │
+│  │ Question│  │ Practice│  │ Exam    │  │ Stats   │   │
 │  │ Service │  │ Service │  │ Service │  │ Service │   │
 │  └─────────┘  └─────────┘  └─────────┘  └─────────┘   │
 │  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐   │
-│  │ PDF     │  │ 导入    │  │ 导出    │  │ 收藏    │   │
+│  │ PDF     │  │ Import  │  │ Export  │  │ Favorite│   │
 │  │ Importer│  │ Service │  │ Service │  │ Service │   │
 │  └─────────┘  └─────────┘  └─────────┘  └─────────┘   │
 └─────────────────────────────────────────────────────────┘
                           ↕
 ┌─────────────────────────────────────────────────────────┐
-│                   数据访问层 (DAO)                        │
+│                   Data Access Layer (DAO)                │
 │  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐   │
-│  │ 题目    │  │ 考试    │  │ 错题    │  │ 收藏    │   │
+│  │ Question│  │ Exam    │  │ Error   │  │ Favorite│   │
 │  │ DAO     │  │ DAO     │  │ DAO     │  │ DAO     │   │
 │  └─────────┘  └─────────┘  └─────────┘  └─────────┘   │
 └─────────────────────────────────────────────────────────┘
                           ↕
 ┌─────────────────────────────────────────────────────────┐
-│                    SQLite 数据库                         │
+│                    SQLite Database                       │
 │  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐   │
 │  │questions│  │exam_    │  │error_   │  │favorite_│   │
 │  │         │  │records  │  │questions│  │questions│   │
@@ -123,251 +125,251 @@
 └─────────────────────────────────────────────────────────┘
 ```
 
-### 项目结构
+### Project Structure
 
 ```
 crac_exam_go/
-├── backend/                    # Go 后端代码
-│   ├── config/                # 配置文件
-│   ├── dao/                   # 数据访问层
-│   ├── models/                # 数据模型
-│   └── services/              # 业务逻辑层
-├── frontend/                   # Vue 前端代码
+├── backend/                    # Go backend code
+│   ├── config/                # Configuration files
+│   ├── dao/                   # Data access layer
+│   ├── models/                # Data models
+│   └── services/              # Business logic layer
+├── frontend/                   # Vue frontend code
 │   ├── src/
-│   │   ├── api/               # API 调用封装
-│   │   ├── assets/            # 静态资源
-│   │   ├── components/        # 公共组件
-│   │   ├── router/            # 路由配置
-│   │   ├── stores/            # Pinia 状态管理
-│   │   ├── views/             # 页面组件
-│   │   └── wailsjs/           # Wails 自动生成
-│   ├── index.html             # 入口 HTML
-│   └── package.json           # 前端依赖
-├── build/                      # 构建输出目录
-│   ├── bin/                   # 编译后的可执行文件
-│   └── appicon.ico            # 应用图标
-├── release/                    # 发布包目录
-│   ├── crac_exam.exe          # 主程序
-│   └── crac_exam-windows-amd64.zip  # 压缩包
-├── logs/                       # 日志目录 (运行时生成)
-├── data/                       # 数据目录 (运行时生成)
-├── icon.ico                    # 应用图标
-├── main.go                     # Go 入口文件
-├── wails.json                  # Wails 配置文件
-├── go.mod                      # Go 依赖管理
-└── README.md                   # 项目说明文档
+│   │   ├── api/               # API call wrappers
+│   │   ├── assets/            # Static assets
+│   │   ├── components/        # Common components
+│   │   ├── router/            # Router configuration
+│   │   ├── stores/            # Pinia state management
+│   │   ├── views/             # Page components
+│   │   └── wailsjs/           # Wails auto-generated
+│   ├── index.html             # Entry HTML
+│   └── package.json           # Frontend dependencies
+├── build/                      # Build output directory
+│   ├── bin/                   # Compiled executable
+│   └── appicon.ico            # Application icon
+├── release/                    # Release package directory
+│   ├── crac_exam.exe          # Main program
+│   └── crac_exam-windows-amd64.zip  # Compressed package
+├── logs/                       # Log directory (generated at runtime)
+├── data/                       # Data directory (generated at runtime)
+├── icon.ico                    # Application icon
+├── main.go                     # Go entry file
+├── wails.json                  # Wails configuration
+├── go.mod                      # Go dependencies
+└── README.md                   # Project documentation
 ```
 
-## 📦 安装与使用
+## 📦 Installation and Usage
 
-### 系统要求
+### System Requirements
 
-- **操作系统**：Windows 10 1803 及以上 / Windows 11
-- **运行环境**：WebView2 Runtime（Windows 10 1803+ 已内置）
-- **内存要求**：最低 2GB RAM，推荐 4GB RAM
-- **磁盘空间**：最低 100MB 可用空间
+- **OS**: Windows 10 1803+ / Windows 11
+- **Runtime**: WebView2 Runtime (built-in for Windows 10 1803+)
+- **Memory**: Minimum 2GB RAM, recommended 4GB RAM
+- **Disk**: Minimum 100MB free space
 
-### 安装步骤
+### Installation
 
-#### 方法一：使用发布包（推荐）
+#### Method 1: Using Release Package (Recommended)
 
-1. 下载最新版本的 `crac_exam-windows-amd64.zip`
-2. 解压到任意目录（建议：`D:\Programs\crac_exam\`）
-3. 双击 `crac_exam.exe` 运行程序
+1. Download the latest `crac_exam-windows-amd64.zip`
+2. Extract to any directory (recommended: `D:\Programs\crac_exam\`)
+3. Double-click `crac_exam.exe` to run
 
-#### 方法二：从源码编译
+#### Method 2: Build from Source
 
-**前置要求**：
+**Prerequisites**:
 
 - Go 1.26+
 - Node.js 18+
 - Wails CLI
 
 ```bash
-# 1. 克隆项目
+# 1. Clone the repository
 git clone https://github.com/dracula-zz-1/crac_exam_go.git
 cd crac_exam_go
 
-# 2. 安装 Wails CLI
+# 2. Install Wails CLI
 go install github.com/wailsapp/wails/v2/cmd/wails@latest
 
-# 3. 安装前端依赖
+# 3. Install frontend dependencies
 cd frontend
 npm install
 cd ..
 
-# 4. 开发模式运行
+# 4. Run in development mode
 wails dev
 
-# 5. 生产模式编译
+# 5. Build for production
 wails build -platform windows/amd64 -trimpath -ldflags "-s -w -extldflags '-static'"
 ```
 
-### 使用说明
+### Usage
 
-#### 首次使用
+#### First Time Setup
 
-1. **导入题库**
-   - 进入「设置」页面
-   - 将 CRAC 官方 PDF 题库文件拖拽到导入区域
-   - 等待导入完成（约 1-2 分钟）
-   - 查看导入统计，确认题目数量正确
-2. **开始学习**
-   - 返回首页，选择要练习的类别（A/B/C）
-   - 点击「逐题练习」开始答题
-   - 或点击「模拟考试」进行全真模拟
+1. **Import Question Bank**
+   - Go to "Settings" page
+   - Drag and drop CRAC official PDF question bank into the import area
+   - Wait for import to complete (about 1-2 minutes)
+   - Check import statistics to verify question count
+2. **Start Learning**
+   - Return to homepage, select category (A/B/C)
+   - Click "Question-by-Question Practice" to start
+   - Or click "Mock Exam" for full simulation
 
-#### 功能使用
+#### Feature Usage
 
-##### 题库管理
+##### Question Bank Management
 
-- **搜索题目**：支持按题号、题干、答案等关键词搜索
-- **筛选分类**：可按 A/B/C 类筛选题目
-- **查看题目**：点击题目查看详情，包括图片
-- **删除题目**：支持单题删除和批量删除
+- **Search**: Search by question ID, stem, answer keywords
+- **Filter**: Filter by A/B/C class
+- **View**: Click question to view details including images
+- **Delete**: Support single and batch delete
 
-##### 在线练习
+##### Online Practice
 
-- **选择类别**：在首页选择 A/B/C 类别
-- **逐题练习**：系统随机出题，答完立即显示结果
-- **错题自动收集**：答错的题目自动加入错题本
-- **收藏题目**：点击星号收藏重点题目
+- **Select Category**: Choose A/B/C category on homepage
+- **Practice**: System randomly selects questions, shows results immediately
+- **Auto Collect Errors**: Wrong answers automatically added to error book
+- **Favorite**: Click star to bookmark important questions
 
-##### 模拟考试
+##### Mock Exam
 
-- **选择类别**：选择对应的考试类别
-- **开始考试**：系统按真实考试规则组卷
-- **答题界面**：显示题号、题目、选项、剩余时间
-- **交卷评分**：时间到或手动交卷后立即显示成绩
+- **Select Category**: Choose corresponding exam category
+- **Start Exam**: System generates paper according to real exam rules
+- **Answer Interface**: Shows question number, stem, options, remaining time
+- **Submit & Score**: Shows score immediately after time expires or manual submit
 
-##### 错题本
+##### Error Book
 
-- **自动收集**：练习和考试中的错题自动加入
-- **分类查看**：按 A/B/C 类分别查看错题
-- **错题练习**：针对错题进行强化练习
-- **移除错题**：掌握后可手动移除
+- **Auto Collection**: Errors from practice and exams automatically added
+- **Category View**: View errors by A/B/C class separately
+- **Error Practice**: Targeted practice on error questions
+- **Remove**: Manually remove mastered questions
 
-##### 收藏夹
+##### Favorites
 
-- **添加收藏**：在题目详情点击收藏按钮
-- **分类管理**：按类别查看收藏的题目
-- **收藏练习**：针对收藏题目进行练习
+- **Add**: Click favorite button in question details
+- **Category Management**: View favorites by category
+- **Favorite Practice**: Practice on favorited questions
 
-##### 学习统计
+##### Statistics
 
-- **成绩趋势**：折线图展示考试成绩变化
-- **时间筛选**：支持 7 天/半年/一年/全部时间范围
-- **分类统计**：分别查看 A/B/C 类的统计数据
-- **详细数据**：考试次数、通过率、平均分等
+- **Score Trend**: Line chart showing exam score changes
+- **Time Filter**: Supports 7 days/half year/year/all time range
+- **Category Stats**: View A/B/C class statistics separately
+- **Detailed Data**: Exam count, pass rate, average score, etc.
 
-### 数据存储
+### Data Storage
 
-所有数据存储在用户目录下的 `.crac_exam` 文件夹：
+All data is stored in the `.crac_exam` folder under user directory:
 
 ```
-C:\Users\用户名\.crac_exam\
+C:\Users\Username\.crac_exam\
 ├── data\
-│   └── exam_questions.db    # SQLite 数据库文件
+│   └── exam_questions.db    # SQLite database file
 └── logs\
-    └── backend.log          # 应用日志文件
+    └── backend.log          # Application log file
 ```
 
-**优势**：
+**Advantages**:
 
-- 与程序分离，重装系统不丢失数据
-- 多用户共享程序，数据独立
-- 清理方便，删除文件夹即可清空数据
+- Separated from program, data survives reinstallation
+- Multi-user sharing program with independent data
+- Easy cleanup, delete folder to clear all data
 
-## 🛠️ 开发指南
+## 🛠️ Development Guide
 
-### 环境搭建
+### Environment Setup
 
-#### 1. 安装 Go
+#### 1. Install Go
 
 ```bash
-# 下载并安装 Go 1.26+
+# Download and install Go 1.26+
 # https://golang.org/dl/
 
-# 验证安装
+# Verify installation
 go version
 ```
 
-#### 2. 安装 Node.js
+#### 2. Install Node.js
 
 ```bash
-# 下载并安装 Node.js 18+
+# Download and install Node.js 18+
 # https://nodejs.org/
 
-# 验证安装
+# Verify installation
 node --version
 npm --version
 ```
 
-#### 3. 安装 Wails CLI
+#### 3. Install Wails CLI
 
 ```bash
 go install github.com/wailsapp/wails/v2/cmd/wails@latest
 ```
 
-#### 4. 安装项目依赖
+#### 4. Install Project Dependencies
 
 ```bash
-# 后端依赖
+# Backend dependencies
 go mod tidy
 
-# 前端依赖
+# Frontend dependencies
 cd frontend
 npm install
 ```
 
-### 开发命令
+### Development Commands
 
 ```bash
-# 开发模式（支持热更新）
+# Development mode (with hot reload)
 wails dev
 
-# 生产模式编译
+# Production build
 wails build
 
-# 编译 Windows 64 位版本
+# Build Windows 64-bit version
 wails build -platform windows/amd64
 
-# 编译带调试信息的版本
+# Build with debug info
 wails build -debug
 
-# 清理构建缓存
+# Clean build cache
 wails build -clean
 ```
 
-### 数据库结构
+### Database Schema
 
-#### 主要数据表
+#### Main Tables
 
-**questions (题目表)**
+**questions**
 
 ```sql
 CREATE TABLE questions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    J TEXT,          -- 题号
-    P TEXT,          -- 分类
-    I TEXT,          -- 唯一标识
-    Q TEXT,          -- 题干
-    T TEXT,          -- 正确答案
-    A TEXT,          -- 选项 A
-    B TEXT,          -- 选项 B
-    C TEXT,          -- 选项 C
-    D TEXT,          -- 选项 D
-    F TEXT,          -- 解析
-    LA INTEGER,      -- A 类标记
-    LB INTEGER,      -- B 类标记
-    LC INTEGER,      -- C 类标记
-    type INTEGER,    -- 题目类型 (1=单选，2=多选)
-    user_id INTEGER, -- 用户 ID
+    J TEXT,          -- Question ID
+    P TEXT,          -- Category
+    I TEXT,          -- Unique identifier
+    Q TEXT,          -- Question stem
+    T TEXT,          -- Correct answer
+    A TEXT,          -- Option A
+    B TEXT,          -- Option B
+    C TEXT,          -- Option C
+    D TEXT,          -- Option D
+    F TEXT,          -- Explanation
+    LA INTEGER,      -- Class A flag
+    LB INTEGER,      -- Class B flag
+    LC INTEGER,      -- Class C flag
+    type INTEGER,    -- Question type (1=single, 2=multiple)
+    user_id INTEGER, -- User ID
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 ```
 
-**exam\_records (考试记录表)**
+**exam\_records**
 
 ```sql
 CREATE TABLE exam_records (
@@ -383,7 +385,7 @@ CREATE TABLE exam_records (
 );
 ```
 
-**error\_questions (错题表)**
+**error\_questions**
 
 ```sql
 CREATE TABLE error_questions (
@@ -396,7 +398,7 @@ CREATE TABLE error_questions (
 );
 ```
 
-**favorite\_questions (收藏表)**
+**favorite\_questions**
 
 ```sql
 CREATE TABLE favorite_questions (
@@ -409,44 +411,44 @@ CREATE TABLE favorite_questions (
 );
 ```
 
-### API 调用
+### API Calls
 
-前端通过 Wails Runtime 调用后端 Go 方法：
+Frontend calls backend Go methods through Wails Runtime:
 
 ```typescript
-// 导入服务
+// Import services
 import { PracticeService, ExamService } from '../wailsjs/go/services'
 
-// 调用 Go 方法
+// Call Go method
 const questions = await PracticeService.GetQuestionsByCategory(1, 'A')
 
-// 处理错误
+// Handle errors
 try {
   const result = await ExamService.CreateExam(userID, category)
 } catch (error) {
-  console.error('考试创建失败:', error)
+  console.error('Exam creation failed:', error)
 }
 ```
 
-### 添加新功能
+### Adding New Features
 
-#### 1. 添加后端服务
+#### 1. Add Backend Service
 
 ```go
 // backend/services/new_service.go
 package services
 
 type NewService struct {
-    // 依赖项
+    // Dependencies
 }
 
 func (s *NewService) DoSomething(param string) (string, error) {
-    // 业务逻辑
+    // Business logic
     return "result", nil
 }
 ```
 
-#### 2. 注册服务
+#### 2. Register Service
 
 ```go
 // main.go
@@ -459,7 +461,7 @@ err := wails.Run(&options.App{
 })
 ```
 
-#### 3. 前端调用
+#### 3. Frontend Call
 
 ```typescript
 // frontend/src/api/NewService.ts
@@ -472,111 +474,111 @@ export const NewService = {
 }
 ```
 
-## ❓ 常见问题
+## ❓ FAQ
 
-### Q1: 程序无法启动，提示 WebView2 缺失
+### Q1: Program won't start, missing WebView2
 
-**解决方案**：
+**Solution**:
 
-1. Windows 10 1803+ 已内置 WebView2，请更新系统
-2. 或手动安装 WebView2 Runtime：
-   - 下载地址：<https://developer.microsoft.com/zh-cn/microsoft-edge/webview2/>
-   - 选择「固定版本」下载 x64 架构
+1. Windows 10 1803+ has WebView2 built-in, please update your system
+2. Or manually install WebView2 Runtime:
+   - Download: <https://developer.microsoft.com/zh-cn/microsoft-edge/webview2/>
+   - Select "Fixed Version" for x64 architecture
 
-### Q2: PDF 导入失败或题目不完整
+### Q2: PDF import fails or questions incomplete
 
-**解决方案**：
+**Solution**:
 
-1. 确保 PDF 文件是 CRAC 官方格式
-2. 检查 PDF 文件是否损坏
-3. 查看日志文件 `C:\Users\用户名\.crac_exam\logs\backend.log`
-4. 尝试重新下载 PDF 题库
+1. Ensure PDF file is in CRAC official format
+2. Check if PDF file is corrupted
+3. Check log file: `C:\Users\Username\.crac_exam\logs\backend.log`
+4. Try re-downloading PDF question bank
 
-### Q3: 考试时图片无法显示
+### Q3: Images don't display during exam
 
-**解决方案**：
+**Solution**:
 
-1. 检查题库导入时是否成功提取图片
-2. 查看数据库 `images` 表是否有图片数据
-3. 重新导入题库，确保图片提取成功
+1. Check if images were successfully extracted during import
+2. Check if `images` table in database has image data
+3. Re-import question bank, ensure image extraction succeeds
 
-### Q4: 数据丢失或损坏
+### Q4: Data loss or corruption
 
-**解决方案**：
+**Solution**:
 
-1. 检查数据文件是否存在：`C:\Users\用户名\.crac_exam\data\exam_questions.db`
-2. 如有备份，恢复备份文件
-3. 重新导入题库
+1. Check if data file exists: `C:\Users\Username\.crac_exam\data\exam_questions.db`
+2. Restore from backup if available
+3. Re-import question bank
 
-### Q5: 程序运行缓慢
+### Q5: Program runs slowly
 
-**解决方案**：
+**Solution**:
 
-1. 关闭其他占用资源的程序
-2. 清理数据库中的无用数据
-3. 检查系统内存是否充足
-4. 尝试重启程序
+1. Close other resource-intensive programs
+2. Clean up unused data in database
+3. Check if system has sufficient memory
+4. Try restarting the program
 
-### Q6: 如何清空所有数据
+### Q6: How to clear all data
 
-**解决方案**：
+**Solution**:
 
-1. 关闭程序
-2. 删除文件夹：`C:\Users\用户名\.crac_exam\`
-3. 重新启动程序，会自动创建新的数据文件
+1. Close the program
+2. Delete folder: `C:\Users\Username\.crac_exam\`
+3. Restart program, it will create new data files automatically
 
-## 📝 更新日志
+## 📝 Changelog
 
 ### v1.0.0 (2026-04-16)
 
-**新增功能**
+**New Features**
 
-- ✅ 完整的 A/B/C 三类题目管理
-- ✅ 逐题练习和模拟考试功能
-- ✅ 错题本和收藏夹功能
-- ✅ 考试成绩统计图表
-- ✅ PDF 题库一键导入
-- ✅ 题目图片自动提取
+- ✅ Complete A/B/C class question management
+- ✅ Question-by-question practice and mock exam
+- ✅ Error book and favorites functionality
+- ✅ Exam score statistics charts
+- ✅ One-click PDF question bank import
+- ✅ Automatic question image extraction
 
-**优化改进**
+**Improvements**
 
-- ✅ 数据存储到用户目录，与程序分离
-- ✅ 单文件打包，包含所有 CGO 依赖
-- ✅ 应用图标和界面优化
-- ✅ 无数据时自动提示并返回首页
+- ✅ Data storage in user directory, separated from program
+- ✅ Single file package with all CGO dependencies
+- ✅ Application icon and UI optimization
+- ✅ Auto prompt and return to home when no data
 
-**Bug 修复**
+**Bug Fixes**
 
-- ✅ 修复多选题答案标记问题
-- ✅ 修复错题本数据加载错误
-- ✅ 修复图表单数据点不显示问题
-- ✅ 修复 PDF 解析题干截断问题
+- ✅ Fixed multiple-choice answer marking issue
+- ✅ Fixed error book data loading error
+- ✅ Fixed chart single data point display issue
+- ✅ Fixed PDF parsing stem truncation issue
 
-## 📄 许可证
+## 📄 License
 
-本项目采用 MIT 许可证。详见 [LICENSE](LICENSE) 文件。
+This project is licensed under the MIT License. See [LICENSE](LICENSE) file for details.
 
-## 🤝 贡献指南
+## 🤝 Contributing
 
-欢迎提交 Issue 和 Pull Request！
+Issues and Pull Requests are welcome!
 
-1. Fork 本项目
-2. 创建功能分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 开启 Pull Request
+1. Fork this project
+2. Create a feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
 
-## 🙏 致谢
+## 🙏 Acknowledgments
 
-感谢以下开源项目：
+Thanks to the following open source projects:
 
-- [Wails](https://wails.io/) - 现代化的 Go 桌面应用框架
-- [Vue.js](https://vuejs.org/) - 渐进式 JavaScript 框架
-- [Element Plus](https://element-plus.org/) - Vue 3 组件库
-- [ECharts](https://echarts.apache.org/) - 强大的数据可视化库
-- [go-fitz](https://github.com/gen2brain/go-fitz) - Go 语言 PDF 处理库
-- [unipdf](https://github.com/oliverpool/unipdf) - Go 语言 PDF 处理库
+- [Wails](https://wails.io/) - Modern Go desktop application framework
+- [Vue.js](https://vuejs.org/) - Progressive JavaScript framework
+- [Element Plus](https://element-plus.org/) - Vue 3 component library
+- [ECharts](https://echarts.apache.org/) - Powerful data visualization library
+- [go-fitz](https://github.com/gen2brain/go-fitz) - Go PDF processing library
+- [unipdf](https://github.com/oliverpool/unipdf) - Go PDF processing library
 
 ***
 
-**祝各位考生考试顺利，早日取得业余无线电操作证书！** 🎉
+**Wish all candidates success in the exam and obtain amateur radio operator certificate soon!** 🎉
