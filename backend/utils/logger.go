@@ -40,8 +40,12 @@ func GetLogger() *logrus.Logger {
 		multiWriter := io.MultiWriter(os.Stdout, fileWriter)
 		logger.SetOutput(multiWriter)
 
-		// 设置日志级别为 Debug，确保所有日志都能输出
-		logger.SetLevel(logrus.DebugLevel)
+		// 设置日志级别为 Info，减少日志输出
+		level := logrus.InfoLevel
+		if os.Getenv("APP_ENV") == "development" {
+			level = logrus.DebugLevel
+		}
+		logger.SetLevel(level)
 	})
 
 	return logger

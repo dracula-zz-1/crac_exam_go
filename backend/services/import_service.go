@@ -222,6 +222,25 @@ func (s *ImportService) ProcessUnifiedData(filePath string) (*ImportResult, erro
 		"file_path": filePath,
 	})
 
+	// 验证文件大小
+	fileInfo, err := os.Stat(filePath)
+	if err != nil {
+		utils.Error("ImportService", "获取文件信息失败", err, nil)
+		return nil, fmt.Errorf("获取文件信息失败：%v", err)
+	}
+	if fileInfo.Size() > 100*1024*1024 { // 100MB限制
+		utils.Error("ImportService", "文件过大", nil, map[string]interface{}{
+			"size": fileInfo.Size(),
+		})
+		return &ImportResult{
+			Success:       false,
+			Message:       "文件过大，最大支持 100MB",
+			ImportedCount: 0,
+			TotalCount:    0,
+			Stats:         make(map[string]int),
+		}, nil
+	}
+
 	// 获取文件扩展名
 	fileExt := filepath.Ext(filePath)
 	fileExt = filepath.Base(fileExt) // 转为小写

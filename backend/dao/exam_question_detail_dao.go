@@ -259,6 +259,47 @@ func (dao *ExamQuestionDetailDAO) BulkCreate(details []*models.ExamQuestionDetai
 	return nil
 }
 
+// BulkUpdate 批量更新考试题目详情
+func (dao *ExamQuestionDetailDAO) BulkUpdate(details []*models.ExamQuestionDetail) error {
+	if len(details) == 0 {
+		return nil
+	}
+
+	// 开始事务
+	tx, err := dao.db.Begin()
+	if err != nil {
+		utils.Error("ExamQuestionDetailDAO", "开始事务失败", err, nil)
+		return err
+	}
+
+	query := `UPDATE exam_question_details 
+              SET user_answer=?, is_correct=? 
+              WHERE id=?`
+
+	for _, detail := range details {
+		_, err := tx.Exec(query, detail.UserAnswer, detail.IsCorrect, detail.ID)
+		if err != nil {
+			tx.Rollback()
+			utils.Error("ExamQuestionDetailDAO", "批量更新考试题目详情失败", err, map[string]interface{}{
+				"exam_id": detail.ExamID,
+			})
+			return err
+		}
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		utils.Error("ExamQuestionDetailDAO", "提交事务失败", err, nil)
+		return err
+	}
+
+	utils.Info("ExamQuestionDetailDAO", "批量更新考试题目详情成功", map[string]interface{}{
+		"count": len(details),
+	})
+
+	return nil
+}
+
 // scanExamQuestionDetail 扫描单行数据
 func (dao *ExamQuestionDetailDAO) scanExamQuestionDetail(row Scanner) (*models.ExamQuestionDetail, error) {
 	detail := &models.ExamQuestionDetail{}

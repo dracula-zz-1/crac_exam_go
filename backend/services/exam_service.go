@@ -6,6 +6,7 @@ import (
 	"crac_exam_go/backend/models"
 	"crac_exam_go/backend/utils"
 	"database/sql"
+	"fmt"
 	"math/rand"
 	"sort"
 	"time"
@@ -117,7 +118,7 @@ func (s *ExamService) CreateExam(userID int64, category string) (*ExamStartRespo
 	// 检查是否有足够的题目
 	if actualSingle+actualMultiple == 0 {
 		utils.Error("ExamService", "没有足够的题目", nil, nil)
-		return nil, nil
+		return nil, fmt.Errorf("题库中没有足够的题目")
 	}
 
 	// 更新配置
@@ -152,7 +153,7 @@ func (s *ExamService) CreateExam(userID int64, category string) (*ExamStartRespo
 	// 检查考试记录是否创建成功
 	if examID == 0 {
 		utils.Error("ExamService", "创建考试记录失败", nil, nil)
-		return nil, nil
+		return nil, fmt.Errorf("创建考试记录失败")
 	}
 
 	// 保存考试题目详情
@@ -177,7 +178,6 @@ func (s *ExamService) CreateExam(userID int64, category string) (*ExamStartRespo
 
 // shuffleQuestions 打乱题目顺序
 func (s *ExamService) shuffleQuestions(questions []*models.Question) {
-	rand.Seed(time.Now().UnixNano())
 	rand.Shuffle(len(questions), func(i, j int) {
 		questions[i], questions[j] = questions[j], questions[i]
 	})
@@ -239,7 +239,6 @@ func (s *ExamService) shuffleOptions(questions []*models.Question) []*models.Que
 
 // shuffleOptionsList 打乱选项列表
 func (s *ExamService) shuffleOptionsList(options []map[string]string) {
-	rand.Seed(time.Now().UnixNano())
 	rand.Shuffle(len(options), func(i, j int) {
 		options[i], options[j] = options[j], options[i]
 	})
@@ -350,6 +349,10 @@ func (s *ExamService) SubmitExam(examID int64, userAnswers map[int64]UserAnswer,
 		return nil, err
 	}
 
+	// 收集需要更新的题目详情和错题
+	var updatedDetails []*models.ExamQuestionDetail
+	var newErrorQuestions []*models.ErrorQuestion
+
 	for _, detail := range examQuestionDetails {
 		questionID := detail.QuestionID
 		totalCount++
@@ -366,16 +369,10 @@ func (s *ExamService) SubmitExam(examID int64, userAnswers map[int64]UserAnswer,
 			isCorrect := s.isAnswerCorrect(userAnswer.Answer, detail.CorrectAnswer, detail.Type)
 			detail.IsCorrect = isCorrect
 
-			err = s.examQuestionDetail.Update(detail)
-			if err != nil {
-				utils.Error("ExamService", "更新题目详情失败", err, nil)
-				return nil, err
-			}
-
 			if isCorrect {
 				correctCount++
 			} else {
-				// 回答错误，添加到错题本
+				// 回答错误，准备添加到错题本
 				utils.Debug("ExamService", "题目回答错误，标记为错误", map[string]interface{}{
 					"question_id": questionID,
 				})
@@ -388,23 +385,11 @@ func (s *ExamService) SubmitExam(examID int64, userAnswers map[int64]UserAnswer,
 				}
 
 				if existingError == nil {
-					// 添加到错题本（只存储引用信息）
-					errorQuestion := &models.ErrorQuestion{
+					// 添加到错题本
+					newErrorQuestions = append(newErrorQuestions, &models.ErrorQuestion{
 						QuestionID: questionID,
 						Category:   category,
 						UserID:     userID,
-					}
-					_, err := s.errorQuestionDAO.Create(errorQuestion)
-					if err != nil {
-						utils.Error("ExamService", "添加错题失败", err, nil)
-					} else {
-						utils.Debug("ExamService", "添加错题成功", map[string]interface{}{
-							"question_id": questionID,
-						})
-					}
-				} else {
-					utils.Debug("ExamService", "题目已存在于错题本", map[string]interface{}{
-						"question_id": questionID,
 					})
 				}
 			}
@@ -412,11 +397,6 @@ func (s *ExamService) SubmitExam(examID int64, userAnswers map[int64]UserAnswer,
 			// 未作答，添加到错题本
 			detail.UserAnswer = ""
 			detail.IsCorrect = false
-			err = s.examQuestionDetail.Update(detail)
-			if err != nil {
-				utils.Error("ExamService", "更新题目详情失败", err, nil)
-				return nil, err
-			}
 
 			utils.Debug("ExamService", "题目未作答，标记为错误", map[string]interface{}{
 				"question_id": questionID,
@@ -430,25 +410,34 @@ func (s *ExamService) SubmitExam(examID int64, userAnswers map[int64]UserAnswer,
 			}
 
 			if existingError == nil {
-				// 添加到错题本（只存储引用信息）
-				errorQuestion := &models.ErrorQuestion{
+				// 添加到错题本
+				newErrorQuestions = append(newErrorQuestions, &models.ErrorQuestion{
 					QuestionID: questionID,
 					Category:   category,
 					UserID:     userID,
-				}
-				_, err := s.errorQuestionDAO.Create(errorQuestion)
-				if err != nil {
-					utils.Error("ExamService", "添加错题失败", err, nil)
-				} else {
-					utils.Debug("ExamService", "添加错题成功", map[string]interface{}{
-						"question_id": questionID,
-					})
-				}
-			} else {
-				utils.Debug("ExamService", "题目已存在于错题本", map[string]interface{}{
-					"question_id": questionID,
 				})
 			}
+		}
+
+		updatedDetails = append(updatedDetails, detail)
+	}
+
+	// 批量更新题目详情
+	err = s.examQuestionDetail.BulkUpdate(updatedDetails)
+	if err != nil {
+		utils.Error("ExamService", "批量更新题目详情失败", err, nil)
+		return nil, err
+	}
+
+	// 批量添加错题
+	if len(newErrorQuestions) > 0 {
+		err = s.errorQuestionDAO.BulkCreate(newErrorQuestions)
+		if err != nil {
+			utils.Error("ExamService", "批量添加错题失败", err, nil)
+		} else {
+			utils.Debug("ExamService", "批量添加错题成功", map[string]interface{}{
+				"count": len(newErrorQuestions),
+			})
 		}
 	}
 

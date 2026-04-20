@@ -1,16 +1,16 @@
 module crac_exam_go
 
-go 1.24.0
+go 1.26.1
 
 require (
 	github.com/gen2brain/go-fitz v1.24.15
 	github.com/glebarez/sqlite v1.11.0
 	github.com/oliverpool/unipdf/v3 v3.10.0
-	github.com/sirupsen/logrus v1.9.3
+	github.com/sirupsen/logrus v1.9.4
 	github.com/wailsapp/wails/v2 v2.12.0
 	github.com/xuri/excelize/v2 v2.10.1
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
-	gorm.io/gorm v1.25.7
+	gorm.io/gorm v1.31.1
 )
 
 require (

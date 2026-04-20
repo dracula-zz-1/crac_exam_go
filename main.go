@@ -40,14 +40,18 @@ func main() {
 			services.NewStatisticsService(services.GetDB()),
 			func() *services.ImportService {
 				// 获取可执行文件所在目录
-				execPath, _ := os.Executable()
+				execPath, err := os.Executable()
+				if err != nil {
+					println("Warning: failed to get executable path:", err.Error())
+					execPath = "."
+				}
 				execDir := filepath.Dir(execPath)
 
 				// Python 脚本目录：优先查找应用目录下的 python_scripts，其次查找开发目录
 				scriptDir := filepath.Join(execDir, "python_scripts")
 				if _, err := os.Stat(scriptDir); os.IsNotExist(err) {
-					// 开发模式：使用绝对路径
-					scriptDir = "D:\\crac_new\\crac_exam_go\\python_scripts"
+					// 开发模式：使用相对路径
+					scriptDir = "python_scripts"
 				}
 
 				// Python 解释器路径：优先查找应用目录下的 python.exe，其次使用系统 PATH 中的 python

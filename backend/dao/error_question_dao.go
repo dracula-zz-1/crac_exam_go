@@ -217,6 +217,47 @@ func (dao *ErrorQuestionDAO) ClearByUser(userID int64) error {
 	return nil
 }
 
+// BulkCreate 批量创建错题记录
+func (dao *ErrorQuestionDAO) BulkCreate(errorQuestions []*models.ErrorQuestion) error {
+	if len(errorQuestions) == 0 {
+		return nil
+	}
+
+	// 开始事务
+	tx, err := dao.db.Begin()
+	if err != nil {
+		utils.Error("ErrorQuestionDAO", "开始事务失败", err, nil)
+		return err
+	}
+
+	query := `INSERT INTO error_questions (question_id, category, user_id, created_at) 
+              VALUES (?, ?, ?, ?)`
+
+	now := time.Now().Format("2006-01-02 15:04:05")
+	for _, eq := range errorQuestions {
+		_, err := tx.Exec(query, eq.QuestionID, eq.Category, eq.UserID, now)
+		if err != nil {
+			tx.Rollback()
+			utils.Error("ErrorQuestionDAO", "批量创建错题记录失败", err, map[string]interface{}{
+				"user_id": eq.UserID,
+			})
+			return err
+		}
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		utils.Error("ErrorQuestionDAO", "提交事务失败", err, nil)
+		return err
+	}
+
+	utils.Info("ErrorQuestionDAO", "批量创建错题记录成功", map[string]interface{}{
+		"count": len(errorQuestions),
+	})
+
+	return nil
+}
+
 // GetCountByUser 获取用户错题数量
 func (dao *ErrorQuestionDAO) GetCountByUser(userID int64) (int, error) {
 	query := `SELECT COUNT(*) FROM error_questions WHERE user_id = ?`
