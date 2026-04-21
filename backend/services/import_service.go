@@ -1,27 +1,24 @@
 package services
 
 import (
-	"bytes"
 	"crac_exam_go/backend/dao"
 	"crac_exam_go/backend/models"
 	"crac_exam_go/backend/utils"
-	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
+	"strings"
+
+	"gorm.io/gorm"
 )
 
 // ImportService 导入服务
 type ImportService struct {
 	questionDAO *dao.QuestionDAO
-	pythonPath  string
-	scriptDir   string
-	db          *sql.DB
+	db          *gorm.DB
 }
 
 // ImportResult 导入结果
@@ -34,12 +31,10 @@ type ImportResult struct {
 }
 
 // NewImportService 创建 ImportService 实例
-func NewImportService(db *sql.DB, pythonPath string, scriptDir string) *ImportService {
+func NewImportService(db *gorm.DB) *ImportService {
 	return &ImportService{
 		questionDAO: dao.NewQuestionDAO(db),
 		db:          db,
-		pythonPath:  pythonPath,
-		scriptDir:   scriptDir,
 	}
 }
 
@@ -59,7 +54,6 @@ func (s *ImportService) ResetDatabase() (bool, error) {
 }
 
 // ImportQuestions 导入题目到数据库
-// Python 原版：import_questions(questions) -> Tuple[bool, str, int, Dict]
 func (s *ImportService) ImportQuestions(questions []*models.Question) (*ImportResult, error) {
 	utils.Info("ImportService", "开始导入题目", map[string]interface{}{
 		"total": len(questions),
@@ -216,7 +210,6 @@ func calculateImportStats(questions []*models.Question) map[string]int {
 }
 
 // ProcessUnifiedData 根据文件类型自动处理数据并导入数据库（通过文件路径）
-// Python 原版：process_unified_data(file_path, ...)
 func (s *ImportService) ProcessUnifiedData(filePath string) (*ImportResult, error) {
 	utils.Info("ImportService", "开始处理文件", map[string]interface{}{
 		"file_path": filePath,
@@ -242,8 +235,29 @@ func (s *ImportService) ProcessUnifiedData(filePath string) (*ImportResult, erro
 	}
 
 	// 获取文件扩展名
-	fileExt := filepath.Ext(filePath)
-	fileExt = filepath.Base(fileExt) // 转为小写
+	fileExt := strings.ToLower(filepath.Ext(filePath))
+
+	// 文件类型白名单验证
+	validExts := map[string]bool{
+		".json": true,
+		".xlsx": true,
+		".xls":  true,
+		".csv":  true,
+		".zip":  true,
+	}
+
+	if !validExts[fileExt] {
+		utils.Error("ImportService", "不支持的文件类型", nil, map[string]interface{}{
+			"extension": fileExt,
+		})
+		return &ImportResult{
+			Success:       false,
+			Message:       fmt.Sprintf("不支持的文件类型：%s", fileExt),
+			ImportedCount: 0,
+			TotalCount:    0,
+			Stats:         make(map[string]int),
+		}, nil
+	}
 
 	utils.Debug("ImportService", "文件类型", map[string]interface{}{
 		"extension": fileExt,
@@ -420,176 +434,6 @@ func (s *ImportService) processPDFData(filePath string) (*ImportResult, error) {
 	}
 
 	return s.ImportQuestions(questions)
-}
-
-// callPythonScript 调用 Python 脚本处理数据
-func (s *ImportService) callPythonScript(scriptType string, filePath string) (*ImportResult, error) {
-	// 确定 Python 脚本路径
-	scriptPath := filepath.Join(s.scriptDir, fmt.Sprintf("import_%s.py", scriptType))
-
-	// 检查 Python 脚本是否存在
-	if _, err := os.Stat(scriptPath); os.IsNotExist(err) {
-		utils.Error("ImportService", "Python 脚本不存在", err, map[string]interface{}{
-			"script_path": scriptPath,
-		})
-		return nil, fmt.Errorf("Python 脚本不存在：%s", scriptPath)
-	}
-
-	// 创建临时文件存储结果
-	tempFile, err := os.CreateTemp("", "import_result_*.json")
-	if err != nil {
-		utils.Error("ImportService", "创建临时文件失败", err, nil)
-		return nil, err
-	}
-	tempFilePath := tempFile.Name()
-	tempFile.Close()
-	defer os.Remove(tempFilePath)
-
-	// 构建 Python 命令
-	pythonScript := fmt.Sprintf(`
-import sys
-sys.path.insert(0, r'%s')
-from import_%s import process_pdf_data
-import json
-
-result = process_pdf_data(r'%s')
-with open(r'%s', 'w', encoding='utf-8') as f:
-    json.dump(result, f, ensure_ascii=False)
-`, s.scriptDir, scriptType, filePath, tempFilePath)
-
-	utils.Debug("ImportService", "执行 Python 脚本", map[string]interface{}{
-		"script": scriptType,
-		"file":   filePath,
-	})
-
-	// 执行 Python 脚本
-	var cmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		cmd = exec.Command(s.pythonPath, "-c", pythonScript)
-	} else {
-		cmd = exec.Command("python3", "-c", pythonScript)
-	}
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	err = cmd.Run()
-	if err != nil {
-		utils.Error("ImportService", "执行 Python 脚本失败", err, map[string]interface{}{
-			"stderr": stderr.String(),
-		})
-		return nil, fmt.Errorf("执行 Python 脚本失败：%v", err)
-	}
-
-	// 读取结果文件
-	resultData, err := os.ReadFile(tempFilePath)
-	if err != nil {
-		utils.Error("ImportService", "读取结果文件失败", err, nil)
-		return nil, err
-	}
-
-	// 解析结果
-	var result map[string]interface{}
-	err = json.Unmarshal(resultData, &result)
-	if err != nil {
-		utils.Error("ImportService", "解析结果数据失败", err, nil)
-		return nil, err
-	}
-
-	// 检查是否成功
-	success, _ := result["success"].(bool)
-	if !success {
-		message, _ := result["message"].(string)
-		return &ImportResult{
-			Success:       false,
-			Message:       message,
-			ImportedCount: 0,
-			TotalCount:    0,
-			Stats:         make(map[string]int),
-		}, nil
-	}
-
-	// 提取题目数据并导入
-	questionsData, ok := result["questions"].([]interface{})
-	if !ok {
-		return &ImportResult{
-			Success:       false,
-			Message:       "无法解析题目数据",
-			ImportedCount: 0,
-			TotalCount:    0,
-			Stats:         make(map[string]int),
-		}, nil
-	}
-
-	// 将 interface{} 转换为 []*models.Question
-	questions := make([]*models.Question, 0)
-	for _, q := range questionsData {
-		qMap, ok := q.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		question := &models.Question{}
-		if v, ok := qMap["J"].(string); ok {
-			question.J = v
-		}
-		if v, ok := qMap["P"].(string); ok {
-			question.P = v
-		}
-		if v, ok := qMap["I"].(string); ok {
-			question.I = v
-		}
-		if v, ok := qMap["Q"].(string); ok {
-			question.Q = v
-		}
-		if v, ok := qMap["T"].(string); ok {
-			question.T = v
-		}
-		if v, ok := qMap["A"].(string); ok {
-			question.A = v
-		}
-		if v, ok := qMap["B"].(string); ok {
-			question.B = v
-		}
-		if v, ok := qMap["C"].(string); ok {
-			question.C = v
-		}
-		if v, ok := qMap["D"].(string); ok {
-			question.D = v
-		}
-		if v, ok := qMap["F"].(string); ok {
-			question.F = v
-		}
-		if v, ok := qMap["LA"].(int); ok {
-			question.LA = v
-		} else if v, ok := qMap["LA"].(float64); ok {
-			question.LA = int(v)
-		}
-		if v, ok := qMap["LB"].(int); ok {
-			question.LB = v
-		} else if v, ok := qMap["LB"].(float64); ok {
-			question.LB = int(v)
-		}
-		if v, ok := qMap["LC"].(int); ok {
-			question.LC = v
-		} else if v, ok := qMap["LC"].(float64); ok {
-			question.LC = int(v)
-		}
-		if v, ok := qMap["type"].(float64); ok {
-			question.Type = int(v)
-		}
-
-		questions = append(questions, question)
-	}
-
-	// 导入题目到数据库
-	importResult, err := s.ImportQuestions(questions)
-	if err != nil {
-		return nil, err
-	}
-
-	return importResult, nil
 }
 
 // GetImportStats 获取导入统计信息

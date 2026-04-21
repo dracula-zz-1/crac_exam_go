@@ -4,10 +4,9 @@ import (
 	"crac_exam_go/backend/dao"
 	"crac_exam_go/backend/models"
 	"crac_exam_go/backend/utils"
-	"database/sql"
-	"math/rand"
-	"sort"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 // PracticeService 练习服务
@@ -18,7 +17,7 @@ type PracticeService struct {
 }
 
 // NewPracticeService 创建 PracticeService 实例
-func NewPracticeService(db *sql.DB) *PracticeService {
+func NewPracticeService(db *gorm.DB) *PracticeService {
 	return &PracticeService{
 		questionDAO:         dao.NewQuestionDAO(db),
 		practiceProgressDAO: dao.NewPracticeProgressDAO(db),
@@ -127,7 +126,7 @@ func (s *PracticeService) ShuffleOptions(questions []*models.Question) []*models
 		for k, v := range originalOptions {
 			options = append(options, map[string]string{"key": k, "value": v})
 		}
-		s.shuffleOptionsList(options)
+		utils.ShuffleOptions(options)
 
 		// 重新赋值打乱后的选项
 		if len(options) >= 4 {
@@ -153,7 +152,7 @@ func (s *PracticeService) ShuffleOptions(questions []*models.Question) []*models
 
 			// 对新的正确答案进行排序（多选题）
 			if len(newCorrect) > 1 {
-				newCorrect = s.sortString(newCorrect)
+				newCorrect = utils.SortString(newCorrect)
 			}
 
 			question.T = newCorrect
@@ -165,23 +164,6 @@ func (s *PracticeService) ShuffleOptions(questions []*models.Question) []*models
 	})
 
 	return questions
-}
-
-// shuffleOptionsList 打乱选项列表
-func (s *PracticeService) shuffleOptionsList(options []map[string]string) {
-	rand.Seed(time.Now().UnixNano())
-	rand.Shuffle(len(options), func(i, j int) {
-		options[i], options[j] = options[j], options[i]
-	})
-}
-
-// sortString 对字符串进行排序
-func (s *PracticeService) sortString(str string) string {
-	chars := []rune(str)
-	sort.Slice(chars, func(i, j int) bool {
-		return chars[i] < chars[j]
-	})
-	return string(chars)
 }
 
 // GetPracticeProgress 获取练习进度

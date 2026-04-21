@@ -239,9 +239,6 @@ export namespace services {
 	export class AppInfo {
 	    name: string;
 	    version: string;
-	    description: string;
-	    author: string;
-	    copyright: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new AppInfo(source);
@@ -251,9 +248,6 @@ export namespace services {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
 	        this.version = source["version"];
-	        this.description = source["description"];
-	        this.author = source["author"];
-	        this.copyright = source["copyright"];
 	    }
 	}
 	export class ExamResult {

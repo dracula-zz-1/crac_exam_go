@@ -18,40 +18,16 @@ export function DeleteUser(arg1) {
   return window['go']['services']['SettingsService']['DeleteUser'](arg1);
 }
 
-export function ExportQuestionsToCSV(arg1) {
-  return window['go']['services']['SettingsService']['ExportQuestionsToCSV'](arg1);
-}
-
-export function ExportQuestionsToExcel(arg1) {
-  return window['go']['services']['SettingsService']['ExportQuestionsToExcel'](arg1);
-}
-
-export function ExportQuestionsToJSON(arg1) {
-  return window['go']['services']['SettingsService']['ExportQuestionsToJSON'](arg1);
-}
-
 export function GetAllExamConfigs() {
   return window['go']['services']['SettingsService']['GetAllExamConfigs']();
-}
-
-export function GetAllUsers() {
-  return window['go']['services']['SettingsService']['GetAllUsers']();
 }
 
 export function GetAppInfo() {
   return window['go']['services']['SettingsService']['GetAppInfo']();
 }
 
-export function GetDatabaseStats() {
-  return window['go']['services']['SettingsService']['GetDatabaseStats']();
-}
-
 export function GetExamConfig(arg1) {
   return window['go']['services']['SettingsService']['GetExamConfig'](arg1);
-}
-
-export function GetFilteredRecordsCount(arg1, arg2, arg3, arg4) {
-  return window['go']['services']['SettingsService']['GetFilteredRecordsCount'](arg1, arg2, arg3, arg4);
 }
 
 export function GetQuestionByID(arg1) {
@@ -62,16 +38,8 @@ export function GetQuestionsPage(arg1, arg2, arg3, arg4, arg5, arg6) {
   return window['go']['services']['SettingsService']['GetQuestionsPage'](arg1, arg2, arg3, arg4, arg5, arg6);
 }
 
-export function GetUserCount() {
-  return window['go']['services']['SettingsService']['GetUserCount']();
-}
-
 export function ImportQuestions(arg1) {
   return window['go']['services']['SettingsService']['ImportQuestions'](arg1);
-}
-
-export function ResetDatabase() {
-  return window['go']['services']['SettingsService']['ResetDatabase']();
 }
 
 export function UpdateQuestion(arg1, arg2) {

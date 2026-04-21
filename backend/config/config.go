@@ -11,7 +11,6 @@ type Config struct {
 	Version      string
 	DatabasePath string
 	LogPath      string
-	PythonPath   string
 }
 
 var AppConfig *Config
@@ -36,7 +35,6 @@ func init() {
 		Version:      "1.0.0",
 		DatabasePath: filepath.Join(baseDir, "data", "exam_questions.db"),
 		LogPath:      filepath.Join(baseDir, "logs"),
-		PythonPath:   filepath.Join(baseDir, "backend", "python_scripts"),
 	}
 }
 
@@ -48,9 +46,4 @@ func GetDatabasePath() string {
 // GetLogPath 获取日志文件路径
 func GetLogPath() string {
 	return AppConfig.LogPath
-}
-
-// GetPythonScriptPath 获取 Python 脚本目录
-func GetPythonScriptPath() string {
-	return AppConfig.PythonPath
 }

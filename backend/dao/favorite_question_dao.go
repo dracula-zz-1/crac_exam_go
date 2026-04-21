@@ -3,7 +3,8 @@ package dao
 import (
 	"crac_exam_go/backend/models"
 	"crac_exam_go/backend/utils"
-	"database/sql"
+
+	"gorm.io/gorm"
 )
 
 // FavoriteQuestionDAO 收藏题目数据访问对象
@@ -12,7 +13,7 @@ type FavoriteQuestionDAO struct {
 }
 
 // NewFavoriteQuestionDAO 创建 FavoriteQuestionDAO 实例
-func NewFavoriteQuestionDAO(db *sql.DB) *FavoriteQuestionDAO {
+func NewFavoriteQuestionDAO(db *gorm.DB) *FavoriteQuestionDAO {
 	return &FavoriteQuestionDAO{
 		BaseDAO: NewBaseDAO(db, "favorite_questions"),
 	}
@@ -20,19 +21,11 @@ func NewFavoriteQuestionDAO(db *sql.DB) *FavoriteQuestionDAO {
 
 // Create 创建收藏题目
 func (dao *FavoriteQuestionDAO) Create(favorite *models.FavoriteQuestion) (int64, error) {
-	query := `INSERT INTO favorite_questions (question_id, category, user_id) VALUES (?, ?, ?)`
-
-	result, err := dao.ExecuteUpdate(query, favorite.QuestionID, favorite.Category, favorite.UserID)
-	if err != nil {
-		return 0, err
+	result := dao.db.Create(favorite)
+	if result.Error != nil {
+		return 0, result.Error
 	}
 
-	id, err := dao.GetLastInsertID(result)
-	if err != nil {
-		return 0, err
-	}
-
-	favorite.ID = id
 	utils.Debug("FavoriteQuestionDAO", "创建收藏题目成功", map[string]interface{}{
 		"favorite_id": favorite.ID,
 		"question_id": favorite.QuestionID,
@@ -45,15 +38,13 @@ func (dao *FavoriteQuestionDAO) Create(favorite *models.FavoriteQuestion) (int64
 
 // GetByID 根据 ID 获取收藏
 func (dao *FavoriteQuestionDAO) GetByID(id int64) (*models.FavoriteQuestion, error) {
-	query := `SELECT id, question_id, category, user_id FROM favorite_questions WHERE id = ?`
-
-	row := dao.QueryRow(query, id)
-	favorite, err := dao.scanFavorite(row)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
+	favorite := &models.FavoriteQuestion{}
+	result := dao.db.First(favorite, id)
+	if result.Error != nil {
+		if result.Error == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, result.Error
 	}
 
 	return favorite, nil
@@ -61,21 +52,10 @@ func (dao *FavoriteQuestionDAO) GetByID(id int64) (*models.FavoriteQuestion, err
 
 // GetByUserID 根据用户 ID 获取所有收藏
 func (dao *FavoriteQuestionDAO) GetByUserID(userID int64) ([]*models.FavoriteQuestion, error) {
-	query := `SELECT id, question_id, category, user_id FROM favorite_questions WHERE user_id = ?`
-
-	rows, err := dao.ExecuteQuery(query, userID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
 	var favorites []*models.FavoriteQuestion
-	for rows.Next() {
-		favorite, err := dao.scanFavoriteRow(rows)
-		if err != nil {
-			return nil, err
-		}
-		favorites = append(favorites, favorite)
+	result := dao.db.Where("user_id = ?", userID).Find(&favorites)
+	if result.Error != nil {
+		return nil, result.Error
 	}
 
 	return favorites, nil
@@ -83,15 +63,13 @@ func (dao *FavoriteQuestionDAO) GetByUserID(userID int64) ([]*models.FavoriteQue
 
 // GetByUserAndQuestion 根据用户 ID 和题目 ID 获取收藏
 func (dao *FavoriteQuestionDAO) GetByUserAndQuestion(userID int64, questionID int64) (*models.FavoriteQuestion, error) {
-	query := `SELECT id, question_id, category, user_id FROM favorite_questions WHERE user_id = ? AND question_id = ?`
-
-	row := dao.QueryRow(query, userID, questionID)
-	favorite, err := dao.scanFavorite(row)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
+	favorite := &models.FavoriteQuestion{}
+	result := dao.db.Where("user_id = ? AND question_id = ?", userID, questionID).First(favorite)
+	if result.Error != nil {
+		if result.Error == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, result.Error
 	}
 
 	return favorite, nil
@@ -99,21 +77,10 @@ func (dao *FavoriteQuestionDAO) GetByUserAndQuestion(userID int64, questionID in
 
 // GetByUserAndCategory 根据用户 ID 和类别获取收藏
 func (dao *FavoriteQuestionDAO) GetByUserAndCategory(userID int64, category string) ([]*models.FavoriteQuestion, error) {
-	query := `SELECT id, question_id, category, user_id FROM favorite_questions WHERE user_id = ? AND category = ?`
-
-	rows, err := dao.ExecuteQuery(query, userID, category)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
 	var favorites []*models.FavoriteQuestion
-	for rows.Next() {
-		favorite, err := dao.scanFavoriteRow(rows)
-		if err != nil {
-			return nil, err
-		}
-		favorites = append(favorites, favorite)
+	result := dao.db.Where("user_id = ? AND category = ?", userID, category).Find(&favorites)
+	if result.Error != nil {
+		return nil, result.Error
 	}
 
 	utils.Debug("FavoriteQuestionDAO", "获取用户类别收藏成功", map[string]interface{}{
@@ -127,11 +94,9 @@ func (dao *FavoriteQuestionDAO) GetByUserAndCategory(userID int64, category stri
 
 // Delete 删除收藏
 func (dao *FavoriteQuestionDAO) Delete(id int64) error {
-	query := `DELETE FROM favorite_questions WHERE id = ?`
-
-	_, err := dao.ExecuteUpdate(query, id)
-	if err != nil {
-		return err
+	result := dao.db.Delete(&models.FavoriteQuestion{}, id)
+	if result.Error != nil {
+		return result.Error
 	}
 
 	utils.Info("FavoriteQuestionDAO", "删除收藏成功", map[string]interface{}{
@@ -143,11 +108,9 @@ func (dao *FavoriteQuestionDAO) Delete(id int64) error {
 
 // DeleteByUserAndQuestion 根据用户 ID 和题目 ID 删除收藏
 func (dao *FavoriteQuestionDAO) DeleteByUserAndQuestion(userID int64, questionID int64) error {
-	query := `DELETE FROM favorite_questions WHERE user_id = ? AND question_id = ?`
-
-	_, err := dao.ExecuteUpdate(query, userID, questionID)
-	if err != nil {
-		return err
+	result := dao.db.Where("user_id = ? AND question_id = ?", userID, questionID).Delete(&models.FavoriteQuestion{})
+	if result.Error != nil {
+		return result.Error
 	}
 
 	utils.Debug("FavoriteQuestionDAO", "删除用户收藏成功", map[string]interface{}{
@@ -159,14 +122,11 @@ func (dao *FavoriteQuestionDAO) DeleteByUserAndQuestion(userID int64, questionID
 }
 
 // GetCountByUser 获取用户收藏数量
-func (dao *FavoriteQuestionDAO) GetCountByUser(userID int64) (int, error) {
-	query := `SELECT COUNT(*) FROM favorite_questions WHERE user_id = ?`
-
-	row := dao.QueryRow(query, userID)
-	var count int
-	err := row.Scan(&count)
-	if err != nil {
-		return 0, err
+func (dao *FavoriteQuestionDAO) GetCountByUser(userID int64) (int64, error) {
+	var count int64
+	result := dao.db.Model(&models.FavoriteQuestion{}).Where("user_id = ?", userID).Count(&count)
+	if result.Error != nil {
+		return 0, result.Error
 	}
 
 	utils.Debug("FavoriteQuestionDAO", "获取用户收藏数量成功", map[string]interface{}{
@@ -178,14 +138,11 @@ func (dao *FavoriteQuestionDAO) GetCountByUser(userID int64) (int, error) {
 }
 
 // GetCountByUserAndCategory 获取用户指定类别的收藏数量
-func (dao *FavoriteQuestionDAO) GetCountByUserAndCategory(userID int64, category string) (int, error) {
-	query := `SELECT COUNT(*) FROM favorite_questions WHERE user_id = ? AND category = ?`
-
-	row := dao.QueryRow(query, userID, category)
-	var count int
-	err := row.Scan(&count)
-	if err != nil {
-		return 0, err
+func (dao *FavoriteQuestionDAO) GetCountByUserAndCategory(userID int64, category string) (int64, error) {
+	var count int64
+	result := dao.db.Model(&models.FavoriteQuestion{}).Where("user_id = ? AND category = ?", userID, category).Count(&count)
+	if result.Error != nil {
+		return 0, result.Error
 	}
 
 	utils.Debug("FavoriteQuestionDAO", "获取用户类别收藏数量成功", map[string]interface{}{
@@ -198,14 +155,11 @@ func (dao *FavoriteQuestionDAO) GetCountByUserAndCategory(userID int64, category
 }
 
 // GetCount 获取收藏总数
-func (dao *FavoriteQuestionDAO) GetCount() (int, error) {
-	query := `SELECT COUNT(*) FROM favorite_questions`
-
-	row := dao.QueryRow(query)
-	var count int
-	err := row.Scan(&count)
-	if err != nil {
-		return 0, err
+func (dao *FavoriteQuestionDAO) GetCount() (int64, error) {
+	var count int64
+	result := dao.db.Model(&models.FavoriteQuestion{}).Count(&count)
+	if result.Error != nil {
+		return 0, result.Error
 	}
 
 	utils.Debug("FavoriteQuestionDAO", "获取收藏总数成功", map[string]interface{}{
@@ -217,11 +171,9 @@ func (dao *FavoriteQuestionDAO) GetCount() (int, error) {
 
 // DeleteByUserAndCategory 根据用户 ID 和类别删除收藏
 func (dao *FavoriteQuestionDAO) DeleteByUserAndCategory(userID int64, category string) error {
-	query := `DELETE FROM favorite_questions WHERE user_id = ? AND category = ?`
-
-	_, err := dao.ExecuteUpdate(query, userID, category)
-	if err != nil {
-		return err
+	result := dao.db.Where("user_id = ? AND category = ?", userID, category).Delete(&models.FavoriteQuestion{})
+	if result.Error != nil {
+		return result.Error
 	}
 
 	utils.Info("FavoriteQuestionDAO", "删除用户类别收藏成功", map[string]interface{}{
@@ -234,11 +186,9 @@ func (dao *FavoriteQuestionDAO) DeleteByUserAndCategory(userID int64, category s
 
 // ClearByUser 清空用户的收藏
 func (dao *FavoriteQuestionDAO) ClearByUser(userID int64) error {
-	query := `DELETE FROM favorite_questions WHERE user_id = ?`
-
-	_, err := dao.ExecuteUpdate(query, userID)
-	if err != nil {
-		return err
+	result := dao.db.Where("user_id = ?", userID).Delete(&models.FavoriteQuestion{})
+	if result.Error != nil {
+		return result.Error
 	}
 
 	utils.Info("FavoriteQuestionDAO", "清空用户收藏成功", map[string]interface{}{
@@ -246,24 +196,4 @@ func (dao *FavoriteQuestionDAO) ClearByUser(userID int64) error {
 	})
 
 	return nil
-}
-
-// scanFavorite 扫描单行数据
-func (dao *FavoriteQuestionDAO) scanFavorite(row Scanner) (*models.FavoriteQuestion, error) {
-	favorite := &models.FavoriteQuestion{}
-	err := row.Scan(&favorite.ID, &favorite.QuestionID, &favorite.Category, &favorite.UserID)
-	if err != nil {
-		return nil, err
-	}
-	return favorite, nil
-}
-
-// scanFavoriteRow 扫描多行数据中的一行
-func (dao *FavoriteQuestionDAO) scanFavoriteRow(rows *sql.Rows) (*models.FavoriteQuestion, error) {
-	favorite := &models.FavoriteQuestion{}
-	err := rows.Scan(&favorite.ID, &favorite.QuestionID, &favorite.Category, &favorite.UserID)
-	if err != nil {
-		return nil, err
-	}
-	return favorite, nil
 }

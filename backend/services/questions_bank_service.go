@@ -4,7 +4,6 @@ import (
 	"crac_exam_go/backend/dao"
 	"crac_exam_go/backend/models"
 	"crac_exam_go/backend/utils"
-	"database/sql"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -13,6 +12,7 @@ import (
 	"strconv"
 
 	"github.com/xuri/excelize/v2"
+	"gorm.io/gorm"
 )
 
 // QuestionsBankService 题库服务
@@ -21,7 +21,7 @@ type QuestionsBankService struct {
 }
 
 // NewQuestionsBankService 创建 QuestionsBankService 实例
-func NewQuestionsBankService(db *sql.DB) *QuestionsBankService {
+func NewQuestionsBankService(db *gorm.DB) *QuestionsBankService {
 	return &QuestionsBankService{
 		dao: dao.NewQuestionsBankDAO(db),
 	}
@@ -64,11 +64,11 @@ func (s *QuestionsBankService) GetPageData(pageNum, pageSize int, searchQuery st
 	}
 
 	// 计算总页数
-	totalPages := (result.Total + pageSize - 1) / pageSize
+	totalPages := int((result.Total + int64(pageSize) - 1) / int64(pageSize))
 
 	pageResult := &PageDataResult{
 		Data:       result.Data,
-		Total:      result.Total,
+		Total:      int(result.Total),
 		Page:       pageNum,
 		PageSize:   pageSize,
 		TotalPages: totalPages,
@@ -154,7 +154,7 @@ func (s *QuestionsBankService) GetFilteredRecordsCount(searchQuery string, filte
 		return 0, err
 	}
 
-	return count, nil
+	return int(count), nil
 }
 
 // DeleteQuestion 删除题目

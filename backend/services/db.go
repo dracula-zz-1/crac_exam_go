@@ -1,68 +1,15 @@
 package services
 
-import (
-	"crac_exam_go/backend/dao"
-	"crac_exam_go/backend/models"
-	"crac_exam_go/backend/utils"
-	"database/sql"
-	"log"
+import "gorm.io/gorm"
 
-	"gorm.io/gorm"
-)
+var dbInstance *gorm.DB
 
-var (
-	dbInstance *sql.DB
-	gormDB     *gorm.DB
-)
-
-// InitDB 初始化数据库连接并创建表
-func InitDB() *sql.DB {
-	if dbInstance != nil {
-		return dbInstance
-	}
-
-	var err error
-	gormDB, err = dao.GetDB()
-	if err != nil {
-		log.Fatal("Failed to initialize database:", err)
-	}
-
-	dbInstance, err = gormDB.DB()
-	if err != nil {
-		log.Fatal("Failed to get sql.DB:", err)
-	}
-
-	// 自动创建数据库表
-	utils.Info("Database", "开始创建数据库表", nil)
-	err = gormDB.AutoMigrate(
-		&models.User{},
-		&models.Question{},
-		&models.ExamRecord{},
-		&models.ExamQuestionDetail{},
-		&models.ErrorQuestion{},
-		&models.FavoriteQuestion{},
-		&models.PracticeProgress{},
-	)
-	if err != nil {
-		log.Fatal("Failed to create database tables:", err)
-	}
-	utils.Info("Database", "数据库表创建成功", nil)
-
-	return dbInstance
+// SetDB 设置数据库实例（由 main.go 初始化时调用）
+func SetDB(db *gorm.DB) {
+	dbInstance = db
 }
 
-// GetDB 获取数据库实例
-func GetDB() *sql.DB {
-	if dbInstance == nil {
-		return InitDB()
-	}
+// GetDB 获取 GORM 数据库实例
+func GetDB() *gorm.DB {
 	return dbInstance
-}
-
-// GetGormDB 获取 GORM 数据库实例
-func GetGormDB() *gorm.DB {
-	if gormDB == nil {
-		InitDB()
-	}
-	return gormDB
 }

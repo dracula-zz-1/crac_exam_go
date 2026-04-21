@@ -3,8 +3,9 @@ package dao
 import (
 	"crac_exam_go/backend/models"
 	"crac_exam_go/backend/utils"
-	"database/sql"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 // ExamRecordDAO 考试记录数据访问对象
@@ -13,7 +14,7 @@ type ExamRecordDAO struct {
 }
 
 // NewExamRecordDAO 创建 ExamRecordDAO 实例
-func NewExamRecordDAO(db *sql.DB) *ExamRecordDAO {
+func NewExamRecordDAO(db *gorm.DB) *ExamRecordDAO {
 	return &ExamRecordDAO{
 		BaseDAO: NewBaseDAO(db, "exam_records"),
 	}
@@ -21,22 +22,11 @@ func NewExamRecordDAO(db *sql.DB) *ExamRecordDAO {
 
 // Create 创建考试记录
 func (dao *ExamRecordDAO) Create(record *models.ExamRecord) (int64, error) {
-	query := `INSERT INTO exam_records (category, exam_date, duration_seconds, user_id, score, total_questions, correct_count) 
-              VALUES (?, ?, ?, ?, ?, ?, ?)`
-
-	result, err := dao.ExecuteUpdate(query,
-		record.Category, record.ExamDate, record.DurationSeconds,
-		record.UserID, record.Score, record.TotalQuestions, record.CorrectCount)
-	if err != nil {
-		return 0, err
+	result := dao.db.Create(record)
+	if result.Error != nil {
+		return 0, result.Error
 	}
 
-	id, err := dao.GetLastInsertID(result)
-	if err != nil {
-		return 0, err
-	}
-
-	record.ID = id
 	utils.Info("ExamRecordDAO", "创建考试记录成功", map[string]interface{}{
 		"exam_id":  record.ID,
 		"category": record.Category,
@@ -49,16 +39,13 @@ func (dao *ExamRecordDAO) Create(record *models.ExamRecord) (int64, error) {
 
 // GetByID 根据 ID 获取考试记录
 func (dao *ExamRecordDAO) GetByID(examID int64) (*models.ExamRecord, error) {
-	query := `SELECT id, category, exam_date, duration_seconds, user_id, score, total_questions, correct_count 
-              FROM exam_records WHERE id = ?`
-
-	row := dao.QueryRow(query, examID)
-	record, err := dao.scanExamRecord(row)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
+	record := &models.ExamRecord{}
+	result := dao.db.First(record, examID)
+	if result.Error != nil {
+		if result.Error == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, result.Error
 	}
 
 	utils.Debug("ExamRecordDAO", "获取考试记录成功", map[string]interface{}{
@@ -70,22 +57,10 @@ func (dao *ExamRecordDAO) GetByID(examID int64) (*models.ExamRecord, error) {
 
 // GetByUserID 根据用户 ID 获取所有考试记录
 func (dao *ExamRecordDAO) GetByUserID(userID int64) ([]*models.ExamRecord, error) {
-	query := `SELECT id, category, exam_date, duration_seconds, user_id, score, total_questions, correct_count 
-              FROM exam_records WHERE user_id = ? ORDER BY exam_date DESC`
-
-	rows, err := dao.ExecuteQuery(query, userID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
 	var records []*models.ExamRecord
-	for rows.Next() {
-		record, err := dao.scanExamRecordRow(rows)
-		if err != nil {
-			return nil, err
-		}
-		records = append(records, record)
+	result := dao.db.Where("user_id = ?", userID).Order("exam_date DESC").Find(&records)
+	if result.Error != nil {
+		return nil, result.Error
 	}
 
 	utils.Debug("ExamRecordDAO", "获取用户考试记录成功", map[string]interface{}{
@@ -98,22 +73,10 @@ func (dao *ExamRecordDAO) GetByUserID(userID int64) ([]*models.ExamRecord, error
 
 // GetByUserAndCategory 根据用户 ID 和类别获取考试记录
 func (dao *ExamRecordDAO) GetByUserAndCategory(userID int64, category string) ([]*models.ExamRecord, error) {
-	query := `SELECT id, category, exam_date, duration_seconds, user_id, score, total_questions, correct_count 
-              FROM exam_records WHERE user_id = ? AND category = ? ORDER BY exam_date DESC`
-
-	rows, err := dao.ExecuteQuery(query, userID, category)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
 	var records []*models.ExamRecord
-	for rows.Next() {
-		record, err := dao.scanExamRecordRow(rows)
-		if err != nil {
-			return nil, err
-		}
-		records = append(records, record)
+	result := dao.db.Where("user_id = ? AND category = ?", userID, category).Order("exam_date DESC").Find(&records)
+	if result.Error != nil {
+		return nil, result.Error
 	}
 
 	utils.Debug("ExamRecordDAO", "获取用户类别考试记录成功", map[string]interface{}{
@@ -127,14 +90,9 @@ func (dao *ExamRecordDAO) GetByUserAndCategory(userID int64, category string) ([
 
 // Delete 删除考试记录
 func (dao *ExamRecordDAO) Delete(examID int64) error {
-	query := `DELETE FROM exam_records WHERE id = ?`
-
-	_, err := dao.ExecuteUpdate(query, examID)
-	if err != nil {
-		utils.Error("ExamRecordDAO", "删除考试记录失败", err, map[string]interface{}{
-			"exam_id": examID,
-		})
-		return err
+	result := dao.db.Delete(&models.ExamRecord{}, examID)
+	if result.Error != nil {
+		return result.Error
 	}
 
 	utils.Info("ExamRecordDAO", "删除考试记录成功", map[string]interface{}{
@@ -143,16 +101,15 @@ func (dao *ExamRecordDAO) Delete(examID int64) error {
 	return nil
 }
 
-// DeleteWithTx 删除考试记录（支持事务）
-func (dao *ExamRecordDAO) DeleteWithTx(examID int64, tx *sql.Tx) error {
-	query := `DELETE FROM exam_records WHERE id = ?`
-
-	_, err := tx.Exec(query, examID)
-	if err != nil {
-		utils.Error("ExamRecordDAO", "删除考试记录失败", err, map[string]interface{}{
-			"exam_id": examID,
-		})
-		return err
+// DeleteByExamID 根据考试 ID 删除所有题目详情
+func (dao *ExamRecordDAO) DeleteByExamID(examID int64, tx *gorm.DB) error {
+	db := tx
+	if db == nil {
+		db = dao.db
+	}
+	result := db.Delete(&models.ExamRecord{}, examID)
+	if result.Error != nil {
+		return result.Error
 	}
 
 	utils.Info("ExamRecordDAO", "删除考试记录成功", map[string]interface{}{
@@ -163,22 +120,10 @@ func (dao *ExamRecordDAO) DeleteWithTx(examID int64, tx *sql.Tx) error {
 
 // GetRecentExams 获取用户最近的考试记录
 func (dao *ExamRecordDAO) GetRecentExams(userID int64, limit int) ([]*models.ExamRecord, error) {
-	query := `SELECT id, category, exam_date, duration_seconds, user_id, score, total_questions, correct_count 
-              FROM exam_records WHERE user_id = ? ORDER BY exam_date DESC LIMIT ?`
-
-	rows, err := dao.ExecuteQuery(query, userID, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
 	var records []*models.ExamRecord
-	for rows.Next() {
-		record, err := dao.scanExamRecordRow(rows)
-		if err != nil {
-			return nil, err
-		}
-		records = append(records, record)
+	result := dao.db.Where("user_id = ?", userID).Order("exam_date DESC").Limit(limit).Find(&records)
+	if result.Error != nil {
+		return nil, result.Error
 	}
 
 	utils.Debug("ExamRecordDAO", "获取用户最近考试记录成功", map[string]interface{}{
@@ -192,16 +137,9 @@ func (dao *ExamRecordDAO) GetRecentExams(userID int64, limit int) ([]*models.Exa
 
 // Update 更新考试记录
 func (dao *ExamRecordDAO) Update(record *models.ExamRecord) error {
-	query := `UPDATE exam_records 
-              SET category=?, exam_date=?, duration_seconds=?, user_id=?, score=?, total_questions=?, correct_count=? 
-              WHERE id=?`
-
-	_, err := dao.ExecuteUpdate(query,
-		record.Category, record.ExamDate, record.DurationSeconds,
-		record.UserID, record.Score, record.TotalQuestions, record.CorrectCount,
-		record.ID)
-	if err != nil {
-		return err
+	result := dao.db.Save(record)
+	if result.Error != nil {
+		return result.Error
 	}
 
 	utils.Debug("ExamRecordDAO", "更新考试记录成功", map[string]interface{}{
@@ -212,24 +150,15 @@ func (dao *ExamRecordDAO) Update(record *models.ExamRecord) error {
 }
 
 // ClearByUser 清空用户的考试记录
-// Python 原版：clear_user_data 中的 DELETE FROM exam_records WHERE user_id = ?
 func (dao *ExamRecordDAO) ClearByUser(userID int64) error {
 	utils.Info("ExamRecordDAO", "清空用户考试记录", map[string]interface{}{
 		"user_id": userID,
 	})
 
-	// 先删除该用户所有考试记录的详情
-	deleteDetailsQuery := `DELETE FROM exam_question_details WHERE exam_id IN (SELECT id FROM exam_records WHERE user_id = ?)`
-	_, err := dao.ExecuteUpdate(deleteDetailsQuery, userID)
-	if err != nil {
-		return err
-	}
-
 	// 删除该用户的所有考试记录
-	deleteQuery := `DELETE FROM exam_records WHERE user_id = ?`
-	_, err = dao.ExecuteUpdate(deleteQuery, userID)
-	if err != nil {
-		return err
+	result := dao.db.Where("user_id = ?", userID).Delete(&models.ExamRecord{})
+	if result.Error != nil {
+		return result.Error
 	}
 
 	utils.Info("ExamRecordDAO", "清空用户考试记录成功", map[string]interface{}{
@@ -239,8 +168,7 @@ func (dao *ExamRecordDAO) ClearByUser(userID int64) error {
 	return nil
 }
 
-// GetExamStatistics 获取考试统计数据（用于统计图表）
-// Python 原版：exam_statistics_dao.get_exam_data(user_id, category, time_range)
+// GetExamStatistics 获取考试统计数据
 func (dao *ExamRecordDAO) GetExamStatistics(userID int64, category string, startDate time.Time) ([]*models.ExamStatisticsData, error) {
 	utils.Debug("ExamRecordDAO", "获取考试统计数据", map[string]interface{}{
 		"user_id":    userID,
@@ -248,7 +176,7 @@ func (dao *ExamRecordDAO) GetExamStatistics(userID int64, category string, start
 		"start_date": startDate,
 	})
 
-	// 构建 SQL 查询
+	// 使用原生 SQL 进行 JOIN 查询
 	query := `
 		SELECT er.id, er.category, er.exam_date,
 		       COUNT(eqd.id) AS total_questions,
@@ -261,13 +189,11 @@ func (dao *ExamRecordDAO) GetExamStatistics(userID int64, category string, start
 
 	params := []interface{}{userID}
 
-	// 添加时间范围条件
 	if !startDate.IsZero() {
 		query += " AND er.exam_date >= ?"
 		params = append(params, startDate)
 	}
 
-	// 添加类别筛选
 	if category != "" {
 		query += " AND er.category = ?"
 		params = append(params, category)
@@ -278,9 +204,8 @@ func (dao *ExamRecordDAO) GetExamStatistics(userID int64, category string, start
 		ORDER BY er.exam_date ASC
 	`
 
-	rows, err := dao.ExecuteQuery(query, params...)
+	rows, err := dao.db.Raw(query, params...).Rows()
 	if err != nil {
-		utils.Error("ExamRecordDAO", "获取考试统计数据失败", err, nil)
 		return nil, err
 	}
 	defer rows.Close()
@@ -297,15 +222,14 @@ func (dao *ExamRecordDAO) GetExamStatistics(userID int64, category string, start
 			&totalQuestions, &correctQuestions, &passRate, &durationSeconds,
 		)
 		if err != nil {
-			utils.Error("ExamRecordDAO", "扫描考试数据失败", err, nil)
 			continue
 		}
 
 		data.TotalQuestions = totalQuestions
 		data.CorrectQuestions = correctQuestions
-		data.PassRate = passRate * 100 // 转换为百分比
+		data.PassRate = passRate * 100
 		data.DurationSeconds = durationSeconds
-		data.Score = float64(correctQuestions) // 每题 1 分
+		data.Score = float64(correctQuestions)
 
 		examData = append(examData, data)
 	}
@@ -318,53 +242,41 @@ func (dao *ExamRecordDAO) GetExamStatistics(userID int64, category string, start
 }
 
 // GetCount 获取考试记录总数
-func (dao *ExamRecordDAO) GetCount() (int, error) {
-	query := `SELECT COUNT(*) FROM exam_records`
-
-	row := dao.QueryRow(query)
-	var count int
-	err := row.Scan(&count)
-	if err != nil {
-		return 0, err
+func (dao *ExamRecordDAO) GetCount() (int64, error) {
+	var count int64
+	result := dao.db.Model(&models.ExamRecord{}).Count(&count)
+	if result.Error != nil {
+		return 0, result.Error
 	}
 
 	return count, nil
 }
 
 // GetCountByUser 获取用户的考试记录总数
-func (dao *ExamRecordDAO) GetCountByUser(userID int64) (int, error) {
-	query := `SELECT COUNT(*) FROM exam_records WHERE user_id = ?`
-
-	row := dao.QueryRow(query, userID)
-	var count int
-	err := row.Scan(&count)
-	if err != nil {
-		return 0, err
+func (dao *ExamRecordDAO) GetCountByUser(userID int64) (int64, error) {
+	var count int64
+	result := dao.db.Model(&models.ExamRecord{}).Where("user_id = ?", userID).Count(&count)
+	if result.Error != nil {
+		return 0, result.Error
 	}
 
 	return count, nil
 }
 
-// scanExamRecord 扫描单行数据
-func (dao *ExamRecordDAO) scanExamRecord(row Scanner) (*models.ExamRecord, error) {
-	record := &models.ExamRecord{}
-	err := row.Scan(
-		&record.ID, &record.Category, &record.ExamDate, &record.DurationSeconds,
-		&record.UserID, &record.Score, &record.TotalQuestions, &record.CorrectCount)
-	if err != nil {
-		return nil, err
+// DeleteWithTx 在事务中删除考试记录
+func (dao *ExamRecordDAO) DeleteWithTx(examID int64, tx *gorm.DB) error {
+	result := tx.Delete(&models.ExamRecord{}, examID)
+	if result.Error != nil {
+		return result.Error
 	}
-	return record, nil
+
+	utils.Info("ExamRecordDAO", "删除考试记录成功（事务）", map[string]interface{}{
+		"exam_id": examID,
+	})
+	return nil
 }
 
-// scanExamRecordRow 扫描多行数据中的一行
-func (dao *ExamRecordDAO) scanExamRecordRow(rows *sql.Rows) (*models.ExamRecord, error) {
-	record := &models.ExamRecord{}
-	err := rows.Scan(
-		&record.ID, &record.Category, &record.ExamDate, &record.DurationSeconds,
-		&record.UserID, &record.Score, &record.TotalQuestions, &record.CorrectCount)
-	if err != nil {
-		return nil, err
-	}
-	return record, nil
+// GetDB 获取数据库实例
+func (dao *ExamRecordDAO) GetDB() *gorm.DB {
+	return dao.db
 }

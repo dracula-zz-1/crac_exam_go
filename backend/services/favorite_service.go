@@ -4,7 +4,8 @@ import (
 	"crac_exam_go/backend/dao"
 	"crac_exam_go/backend/models"
 	"crac_exam_go/backend/utils"
-	"database/sql"
+
+	"gorm.io/gorm"
 )
 
 // FavoriteService 收藏题目服务
@@ -14,7 +15,7 @@ type FavoriteService struct {
 }
 
 // NewFavoriteService 创建 FavoriteService 实例
-func NewFavoriteService(db *sql.DB) *FavoriteService {
+func NewFavoriteService(db *gorm.DB) *FavoriteService {
 	return &FavoriteService{
 		favoriteDAO: dao.NewFavoriteQuestionDAO(db),
 		questionDAO: dao.NewQuestionDAO(db),

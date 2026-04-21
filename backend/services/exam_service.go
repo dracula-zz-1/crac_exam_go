@@ -5,11 +5,11 @@ import (
 	"crac_exam_go/backend/dao"
 	"crac_exam_go/backend/models"
 	"crac_exam_go/backend/utils"
-	"database/sql"
 	"fmt"
 	"math/rand"
-	"sort"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 // ExamService 考试服务
@@ -68,7 +68,7 @@ type UserAnswer struct {
 }
 
 // NewExamService 创建 ExamService 实例
-func NewExamService(db *sql.DB) *ExamService {
+func NewExamService(db *gorm.DB) *ExamService {
 	return &ExamService{
 		examRecordDAO:      dao.NewExamRecordDAO(db),
 		examQuestionDetail: dao.NewExamQuestionDetailDAO(db),
@@ -81,6 +81,17 @@ func NewExamService(db *sql.DB) *ExamService {
 // CreateExam 创建一场新考试
 // Python 原版：create_exam(user_id, category) -> (exam_id, questions, config)
 func (s *ExamService) CreateExam(userID int64, category string) (*ExamStartResponse, error) {
+	// 输入验证
+	if userID <= 0 {
+		return nil, fmt.Errorf("无效的用户 ID：%d", userID)
+	}
+
+	// 验证 category 是否有效
+	validCategories := map[string]bool{"A": true, "B": true, "C": true}
+	if !validCategories[category] {
+		return nil, fmt.Errorf("无效的考试类别：%s，支持的类别：A、B、C", category)
+	}
+
 	// 获取配置
 	examConfig := s.examConfig[category]
 	if examConfig.Total == 0 {
@@ -227,7 +238,7 @@ func (s *ExamService) shuffleOptions(questions []*models.Question) []*models.Que
 
 			// 对新的正确答案进行排序（多选题）
 			if len(newCorrect) > 1 {
-				newCorrect = s.sortString(newCorrect)
+				newCorrect = utils.SortString(newCorrect)
 			}
 
 			question.T = newCorrect
@@ -242,15 +253,6 @@ func (s *ExamService) shuffleOptionsList(options []map[string]string) {
 	rand.Shuffle(len(options), func(i, j int) {
 		options[i], options[j] = options[j], options[i]
 	})
-}
-
-// sortString 对字符串进行排序
-func (s *ExamService) sortString(str string) string {
-	chars := []rune(str)
-	sort.Slice(chars, func(i, j int) bool {
-		return chars[i] < chars[j]
-	})
-	return string(chars)
 }
 
 // saveExamQuestionDetails 保存考试题目详情
@@ -323,10 +325,7 @@ func (s *ExamService) SubmitExam(examID int64, userAnswers map[int64]UserAnswer,
 	}
 
 	if examRecord == nil {
-		utils.Error("ExamService", "考试记录不存在", nil, map[string]interface{}{
-			"exam_id": examID,
-		})
-		return nil, nil
+		return nil, fmt.Errorf("考试记录不存在 (ID: %d)", examID)
 	}
 
 	// 更新考试记录时长
@@ -352,15 +351,12 @@ func (s *ExamService) SubmitExam(examID int64, userAnswers map[int64]UserAnswer,
 	// 收集需要更新的题目详情和错题
 	var updatedDetails []*models.ExamQuestionDetail
 	var newErrorQuestions []*models.ErrorQuestion
+	var wrongQuestionIDs []int64
 
+	// 第一次遍历：判断答案正确性，收集错误题目 ID
 	for _, detail := range examQuestionDetails {
 		questionID := detail.QuestionID
 		totalCount++
-
-		utils.Debug("ExamService", "处理题目", map[string]interface{}{
-			"question_id":  questionID,
-			"user_answers": userAnswers,
-		})
 
 		if userAnswer, exists := userAnswers[questionID]; exists {
 			detail.UserAnswer = userAnswer.Answer
@@ -372,54 +368,37 @@ func (s *ExamService) SubmitExam(examID int64, userAnswers map[int64]UserAnswer,
 			if isCorrect {
 				correctCount++
 			} else {
-				// 回答错误，准备添加到错题本
-				utils.Debug("ExamService", "题目回答错误，标记为错误", map[string]interface{}{
-					"question_id": questionID,
-				})
-
-				// 检查题目是否已存在于错题本
-				existingError, err := s.errorQuestionDAO.GetByUserQuestionAndCategory(userID, questionID, category)
-				if err != nil {
-					utils.Error("ExamService", "检查错题本失败", err, nil)
-					continue
-				}
-
-				if existingError == nil {
-					// 添加到错题本
-					newErrorQuestions = append(newErrorQuestions, &models.ErrorQuestion{
-						QuestionID: questionID,
-						Category:   category,
-						UserID:     userID,
-					})
-				}
+				// 回答错误，收集题目 ID
+				wrongQuestionIDs = append(wrongQuestionIDs, questionID)
 			}
 		} else {
-			// 未作答，添加到错题本
+			// 未作答，标记为错误并收集题目 ID
 			detail.UserAnswer = ""
 			detail.IsCorrect = false
-
-			utils.Debug("ExamService", "题目未作答，标记为错误", map[string]interface{}{
-				"question_id": questionID,
-			})
-
-			// 检查题目是否已存在于错题本
-			existingError, err := s.errorQuestionDAO.GetByUserQuestionAndCategory(userID, questionID, category)
-			if err != nil {
-				utils.Error("ExamService", "检查错题本失败", err, nil)
-				continue
-			}
-
-			if existingError == nil {
-				// 添加到错题本
-				newErrorQuestions = append(newErrorQuestions, &models.ErrorQuestion{
-					QuestionID: questionID,
-					Category:   category,
-					UserID:     userID,
-				})
-			}
+			wrongQuestionIDs = append(wrongQuestionIDs, questionID)
 		}
 
 		updatedDetails = append(updatedDetails, detail)
+	}
+
+	// 批量查询错题本，减少 N+1 查询问题
+	existingErrors, err := s.errorQuestionDAO.BatchGetByUserQuestionAndCategory(userID, category, wrongQuestionIDs)
+	if err != nil {
+		utils.Error("ExamService", "批量查询错题失败", err, nil)
+		return nil, err
+	}
+
+	// 第二次遍历：根据查询结果构建错题列表
+	for _, detail := range updatedDetails {
+		questionID := detail.QuestionID
+		if !detail.IsCorrect && !existingErrors[questionID] {
+			// 添加到错题本
+			newErrorQuestions = append(newErrorQuestions, &models.ErrorQuestion{
+				QuestionID: questionID,
+				Category:   category,
+				UserID:     userID,
+			})
+		}
 	}
 
 	// 批量更新题目详情
@@ -490,7 +469,7 @@ func (s *ExamService) GetExamResult(examID int64) (*ExamResult, error) {
 	}
 
 	if examRecord == nil {
-		return nil, nil
+		return nil, fmt.Errorf("考试记录不存在 (ID: %d)", examID)
 	}
 
 	examQuestionDetails, err := s.examQuestionDetail.GetByExamID(examID)
@@ -542,16 +521,7 @@ func (s *ExamService) isAnswerCorrect(userAnswer, correctAnswer string, question
 	}
 
 	// 排序后比较（确保答案顺序不影响判断）
-	return sortString(userAnswer) == sortString(correctAnswer)
-}
-
-// sortString 对字符串按字符排序（用于多选题答案比较）
-func sortString(s string) string {
-	chars := []rune(s)
-	sort.Slice(chars, func(i, j int) bool {
-		return chars[i] < chars[j]
-	})
-	return string(chars)
+	return utils.SortString(userAnswer) == utils.SortString(correctAnswer)
 }
 
 // InvalidateExam 作废考试记录（用于用户退出未完成的考试）
@@ -562,16 +532,26 @@ func (s *ExamService) InvalidateExam(examID int64) error {
 	})
 
 	// 开启事务
-	tx, err := s.examRecordDAO.GetDB().Begin()
-	if err != nil {
-		utils.Error("ExamService", "开启事务失败", err, map[string]interface{}{
+	tx := s.examRecordDAO.GetDB().Begin()
+	if tx.Error != nil {
+		utils.Error("ExamService", "开启事务失败", tx.Error, map[string]interface{}{
 			"exam_id": examID,
 		})
-		return err
+		return tx.Error
 	}
 
+	// 添加 panic 恢复，确保事务回滚
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+			utils.Error("ExamService", "发生 panic，事务已回滚", fmt.Errorf("%v", r), map[string]interface{}{
+				"exam_id": examID,
+			})
+		}
+	}()
+
 	// 1. 删除考试题目详情
-	err = s.examQuestionDetail.DeleteByExamIDWithTx(examID, tx)
+	err := s.examQuestionDetail.DeleteByExamIDWithTx(examID, tx)
 	if err != nil {
 		tx.Rollback()
 		utils.Error("ExamService", "删除考试题目详情失败", err, map[string]interface{}{
@@ -591,7 +571,12 @@ func (s *ExamService) InvalidateExam(examID int64) error {
 	}
 
 	// 提交事务
-	tx.Commit()
+	if err := tx.Commit().Error; err != nil {
+		utils.Error("ExamService", "提交事务失败", err, map[string]interface{}{
+			"exam_id": examID,
+		})
+		return err
+	}
 
 	utils.Info("ExamService", "考试记录作废成功", map[string]interface{}{
 		"exam_id": examID,

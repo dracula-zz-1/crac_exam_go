@@ -5,8 +5,9 @@ import (
 	"crac_exam_go/backend/dao"
 	"crac_exam_go/backend/models"
 	"crac_exam_go/backend/utils"
-	"database/sql"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 // StatisticsService 统计服务
@@ -42,7 +43,7 @@ type UserStatisticsResult struct {
 }
 
 // NewStatisticsService 创建 StatisticsService 实例
-func NewStatisticsService(db *sql.DB) *StatisticsService {
+func NewStatisticsService(db *gorm.DB) *StatisticsService {
 	return &StatisticsService{
 		examRecordDAO: dao.NewExamRecordDAO(db),
 		examDetailDAO: dao.NewExamQuestionDetailDAO(db),
@@ -194,7 +195,7 @@ func (s *StatisticsService) GetUserStatistics(userID int64) (*UserStatisticsResu
 		utils.Error("StatisticsService", "获取错题数量失败", err, nil)
 		return nil, err
 	}
-	result.TotalErrors = errorCount
+	result.TotalErrors = int(errorCount)
 
 	// 获取收藏数量
 	favoriteCount, err := s.favoriteDAO.GetCountByUser(userID)
@@ -202,7 +203,7 @@ func (s *StatisticsService) GetUserStatistics(userID int64) (*UserStatisticsResu
 		utils.Error("StatisticsService", "获取收藏数量失败", err, nil)
 		return nil, err
 	}
-	result.TotalFavorites = favoriteCount
+	result.TotalFavorites = int(favoriteCount)
 
 	// 获取练习进度统计
 	practiceCount, err := s.practiceDAO.GetCountByUser(userID)
@@ -210,7 +211,7 @@ func (s *StatisticsService) GetUserStatistics(userID int64) (*UserStatisticsResu
 		utils.Error("StatisticsService", "获取练习进度失败", err, nil)
 		return nil, err
 	}
-	result.TotalPractices = practiceCount
+	result.TotalPractices = int(practiceCount)
 
 	utils.Info("StatisticsService", "获取用户统计成功", map[string]interface{}{
 		"user_id":         userID,

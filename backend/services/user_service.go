@@ -4,8 +4,9 @@ import (
 	"crac_exam_go/backend/dao"
 	"crac_exam_go/backend/models"
 	"crac_exam_go/backend/utils"
-	"database/sql"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 // UserService 用户服务
@@ -21,7 +22,7 @@ type UserLoginResponse struct {
 }
 
 // NewUserService 创建 UserService 实例
-func NewUserService(db *sql.DB) *UserService {
+func NewUserService(db *gorm.DB) *UserService {
 	return &UserService{
 		userDAO: dao.NewUserDAO(db),
 	}
@@ -31,6 +32,14 @@ func NewUserService(db *sql.DB) *UserService {
 // Python 原版：login(username, id_card) -> Dict[str, Any]
 // 如果身份证号不存在，会自动创建新用户
 func (s *UserService) Login(username string, idCard string) (*UserLoginResponse, error) {
+	// 输入验证
+	if username == "" || idCard == "" {
+		return &UserLoginResponse{
+			Success: false,
+			Message: "用户名和身份证号不能为空",
+		}, nil
+	}
+
 	utils.Info("UserService", "用户登录", map[string]interface{}{
 		"username": username,
 		"id_card":  idCard,

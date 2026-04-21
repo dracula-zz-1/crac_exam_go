@@ -2,10 +2,10 @@ package main
 
 import (
 	"context"
+	"crac_exam_go/backend/dao"
 	"crac_exam_go/backend/services"
 	"embed"
-	"os"
-	"path/filepath"
+	"log"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -16,8 +16,22 @@ import (
 var assets embed.FS
 
 func main() {
+	// 初始化数据库
+	db, err := dao.GetDB()
+	if err != nil {
+		log.Fatal("数据库初始化失败:", err)
+	}
+
+	// 创建数据库表
+	if err := dao.InitDatabase(); err != nil {
+		log.Fatal("数据库表创建失败:", err)
+	}
+
+	// 设置全局数据库实例供 services 使用
+	services.SetDB(db)
+
 	// 创建应用实例
-	err := wails.Run(&options.App{
+	err = wails.Run(&options.App{
 		Title:         "业余无线电模拟考试系统",
 		Width:         1024,
 		Height:        768,
@@ -27,8 +41,13 @@ func main() {
 		},
 		BackgroundColour: &options.RGBA{R: 255, G: 255, B: 255, A: 255},
 		OnStartup: func(ctx context.Context) {
-			// 初始化数据库
-			services.InitDB()
+			// 数据库已在 main 中初始化
+		},
+		OnShutdown: func(ctx context.Context) {
+			// 关闭数据库连接
+			if err := dao.CloseDB(); err != nil {
+				log.Println("关闭数据库连接失败:", err)
+			}
 		},
 		Bind: []interface{}{
 			services.NewUserService(services.GetDB()),
@@ -38,30 +57,7 @@ func main() {
 			services.NewPracticeService(services.GetDB()),
 			services.NewFavoriteService(services.GetDB()),
 			services.NewStatisticsService(services.GetDB()),
-			func() *services.ImportService {
-				// 获取可执行文件所在目录
-				execPath, err := os.Executable()
-				if err != nil {
-					println("Warning: failed to get executable path:", err.Error())
-					execPath = "."
-				}
-				execDir := filepath.Dir(execPath)
-
-				// Python 脚本目录：优先查找应用目录下的 python_scripts，其次查找开发目录
-				scriptDir := filepath.Join(execDir, "python_scripts")
-				if _, err := os.Stat(scriptDir); os.IsNotExist(err) {
-					// 开发模式：使用相对路径
-					scriptDir = "python_scripts"
-				}
-
-				// Python 解释器路径：优先查找应用目录下的 python.exe，其次使用系统 PATH 中的 python
-				pythonPath := filepath.Join(execDir, "python.exe")
-				if _, err := os.Stat(pythonPath); os.IsNotExist(err) {
-					pythonPath = "python"
-				}
-
-				return services.NewImportService(services.GetDB(), pythonPath, scriptDir)
-			}(),
+			services.NewImportService(services.GetDB()),
 		},
 	})
 
