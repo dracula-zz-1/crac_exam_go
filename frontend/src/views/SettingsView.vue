@@ -66,6 +66,26 @@
         </div>
       </div>
 
+      <!-- 导入进度悬浮对话框 -->
+      <teleport to="body">
+        <div v-if="showImportProgress" class="import-progress-overlay">
+          <div class="import-progress-dialog">
+            <div class="progress-header">
+              <span class="progress-title">正在导入题库</span>
+              <span class="progress-percent">{{ importProgressPercent }}%</span>
+            </div>
+            <el-progress
+              :percentage="importProgressPercent"
+              :stroke-width="12"
+              striped
+              striped-flow
+              :show-text="false"
+            />
+            <p class="progress-tip">{{ importProgressMessage || '正在处理中，请稍候...' }}</p>
+          </div>
+        </div>
+      </teleport>
+
       <!-- 考试统计 -->
       <div v-show="currentMenu === 1" class="settings-content">
         <h1 class="content-title">考试统计</h1>
@@ -177,6 +197,10 @@ import { ProcessUnifiedData, ProcessFileContent } from '@wailsjs/go/services/Imp
 
 import { OnFileDrop, OnFileDropOff } from '@wailsjs/runtime/runtime'
 
+const emit = defineEmits<{
+  dataCleared: []
+}>()
+
 const userStore = useUserStore()
 
 const currentMenu = ref(0)
@@ -185,6 +209,34 @@ const clearOptions = ref<string[]>(['user_data'])
 // 导入结果统计
 const showImportStats = ref(false)
 const importStatsData = ref<any[]>([])
+
+// 导入进度悬浮窗
+const showImportProgress = ref(false)
+const importProgressPercent = ref(0)
+const importProgressMessage = ref('')
+
+// 监听后端发送的导入进度事件
+let unlistenProgress: (() => void) | null = null
+
+const setupProgressListener = () => {
+  import('@wailsjs/runtime/runtime').then((runtime) => {
+    unlistenProgress = runtime.EventsOn('import-progress', (data: any) => {
+      if (data && typeof data.percent === 'number') {
+        showImportProgress.value = true
+        importProgressPercent.value = data.percent
+        if (data.message) {
+          importProgressMessage.value = data.message
+        }
+      }
+    })
+  })
+}
+
+const hideProgress = () => {
+  showImportProgress.value = false
+  importProgressPercent.value = 0
+  importProgressMessage.value = ''
+}
 
 // 考试统计相关
 const selectedCategory = ref<string>('A')
@@ -233,8 +285,6 @@ const selectFile = async () => {
       const file = target.files?.[0]
       if (!file) return
       
-      ElMessage.info(`开始导入文件：${file.name}`)
-      
       const fileType = file.name.split('.').pop()?.toLowerCase() || ''
       
       try {
@@ -259,18 +309,29 @@ const selectFile = async () => {
               content = event.target?.result as string
             }
             
-            // 调用后端导入服务（传递文件内容和类型）
-            const result = await ProcessFileContent(content, fileType)
+            showImportProgress.value = true
             
-            if (result && result.success) {
-              ElMessage.success(`导入成功！共导入 ${result.imported_count}/${result.total_count} 道题目`)
+            try {
+              // 调用后端导入服务（传递文件内容和类型）
+              const result = await ProcessFileContent(content, fileType)
               
-              // 显示统计表格
-              showImportStatsTable(result.stats)
-            } else {
-              ElMessage.error(result?.message || '导入失败')
+              if (result && result.success) {
+                setTimeout(() => hideProgress(), 500)
+                ElMessage.success(`导入成功！共导入 ${result.imported_count}/${result.total_count} 道题目`)
+                
+                // 显示统计表格
+                showImportStatsTable(result.stats)
+              } else {
+                hideProgress()
+                ElMessage.error(result?.message || '导入失败')
+              }
+            } catch (importError: any) {
+              hideProgress()
+              ElMessage.error('导入失败：' + importError.message)
+              console.error('Import error:', importError)
             }
           } catch (error: any) {
+            hideProgress()
             ElMessage.error('导入失败：' + error.message)
             console.error('Import error:', error)
           }
@@ -310,29 +371,30 @@ const handleWailsDrop = async (event: DragEvent) => {
     const filePath = (file as any).path
     if (filePath) {
       console.log('获取到文件路径:', filePath)
-      const fileName = file.name
       
-      ElMessage.info(`开始导入文件：${fileName}`)
+      showImportProgress.value = true
       
-      // 直接调用后端导入服务（传递真实文件路径）
-      ProcessUnifiedData(filePath).then(result => {
-        console.log('导入结果:', result)
+      try {
+        const result = await ProcessUnifiedData(filePath)
+        
         if (result && result.success) {
+          setTimeout(() => hideProgress(), 500)
+          console.log('导入结果:', result)
           ElMessage.success(`导入成功！共导入 ${result.imported_count}/${result.total_count} 道题目`)
           
           console.log('result.stats:', result.stats)
-          // 显示统计表格
           showImportStatsTable(result.stats)
         } else {
+          hideProgress()
           ElMessage.error(result?.message || '导入失败')
         }
-      }).catch(error => {
-        ElMessage.error('导入失败：' + error.message)
-        console.error('Import error:', error)
-      })
+      } catch (importError: any) {
+        hideProgress()
+        ElMessage.error('导入失败：' + importError.message)
+        console.error('Import error:', importError)
+      }
     } else {
       // 没有路径，使用 FileReader 读取内容
-      ElMessage.info(`开始导入文件：${file.name}`)
       const fileType = file.name.split('.').pop()?.toLowerCase() || ''
       
       try {
@@ -353,20 +415,29 @@ const handleWailsDrop = async (event: DragEvent) => {
               content = event.target?.result as string
             }
             
-            const result = await ProcessFileContent(content, fileType)
+            showImportProgress.value = true
             
-            console.log('导入结果:', result)
-            
-            if (result && result.success) {
-              ElMessage.success(`导入成功！共导入 ${result.imported_count}/${result.total_count} 道题目`)
+            try {
+              const result = await ProcessFileContent(content, fileType)
               
-              console.log('result.stats:', result.stats)
-              // 显示统计表格
-              showImportStatsTable(result.stats)
-            } else {
-              ElMessage.error(result?.message || '导入失败')
+              if (result && result.success) {
+                setTimeout(() => hideProgress(), 500)
+                console.log('导入结果:', result)
+                ElMessage.success(`导入成功！共导入 ${result.imported_count}/${result.total_count} 道题目`)
+                
+                console.log('result.stats:', result.stats)
+                showImportStatsTable(result.stats)
+              } else {
+                hideProgress()
+                ElMessage.error(result?.message || '导入失败')
+              }
+            } catch (importError: any) {
+              hideProgress()
+              ElMessage.error('导入失败：' + importError.message)
+              console.error('Import error:', importError)
             }
           } catch (error: any) {
+            hideProgress()
             ElMessage.error('导入失败：' + error.message)
             console.error('Import error:', error)
           }
@@ -446,11 +517,17 @@ const importTotalCount = ref(0)
 onMounted(() => {
   // 启用文件拖拽
   enableFileDrop()
+  // 设置导入进度监听器
+  setupProgressListener()
 })
 
 onUnmounted(() => {
   // 清理拖拽监听器
   OnFileDropOff()
+  // 清理进度监听器
+  if (unlistenProgress) {
+    unlistenProgress()
+  }
 })
 
 // 生成考试成绩趋势图
@@ -716,6 +793,7 @@ const confirmClearData = async () => {
     
     ElMessage.success('数据已清空')
     clearOptions.value = []
+    emit('dataCleared')
   } catch (error: any) {
     if (error !== 'cancel') {
       ElMessage.error(error.message || '清空失败')
@@ -1086,5 +1164,54 @@ const confirmClearData = async () => {
   margin-left: 20px;
   line-height: 2;
   color: #666;
+}
+
+/* 导入进度悬浮对话框 */
+.import-progress-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.import-progress-dialog {
+  background: white;
+  border-radius: 12px;
+  padding: 30px 40px;
+  width: 400px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+.progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.progress-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.progress-percent {
+  font-size: 16px;
+  font-weight: 600;
+  color: #409EFF;
+}
+
+.progress-tip {
+  margin-top: 12px;
+  font-size: 12px;
+  color: #909399;
+  text-align: center;
+  margin-bottom: 0;
 }
 </style>

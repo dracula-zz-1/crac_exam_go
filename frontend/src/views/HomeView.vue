@@ -144,7 +144,7 @@
       --el-dialog-padding-primary: 15px;
     >
       <div style="height: 82vh; overflow: hidden;">
-        <SettingsView @close="showSettings = false" />
+        <SettingsView @close="showSettings = false" @dataCleared="handleDataCleared" />
       </div>
     </el-dialog>
 
@@ -298,6 +298,11 @@ const startMode = (mode: string, category: string) => {
 
 // 从其他页面返回首页时调用，刷新统计数据
 const refreshHomeData = () => {
+  loadStatistics()
+}
+
+// 数据清空后刷新用户信息
+const handleDataCleared = () => {
   loadStatistics()
 }
 

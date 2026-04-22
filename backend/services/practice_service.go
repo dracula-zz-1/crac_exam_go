@@ -4,6 +4,7 @@ import (
 	"crac_exam_go/backend/dao"
 	"crac_exam_go/backend/models"
 	"crac_exam_go/backend/utils"
+	"fmt"
 	"time"
 
 	"gorm.io/gorm"
@@ -49,6 +50,17 @@ func (s *PracticeService) GetQuestionsByCategory(category string) ([]*models.Que
 // GetErrorQuestions 根据用户 ID 和类别获取错题，并关联查询题目详情
 // Python 原版：get_error_questions(user_id, category) -> List[Question]
 func (s *PracticeService) GetErrorQuestions(userID int64, category string) ([]*models.Question, error) {
+	// 输入验证
+	if userID <= 0 {
+		utils.Warn("PracticeService", "无效的用户 ID", map[string]interface{}{"user_id": userID})
+		return nil, fmt.Errorf("无效的用户 ID")
+	}
+	validCategories := map[string]bool{"A": true, "B": true, "C": true}
+	if !validCategories[category] {
+		utils.Warn("PracticeService", "无效的错题类别", map[string]interface{}{"category": category})
+		return nil, fmt.Errorf("无效的类别：%s（仅支持 A/B/C）", category)
+	}
+
 	utils.Info("PracticeService", "获取用户错题", map[string]interface{}{
 		"user_id":  userID,
 		"category": category,
@@ -56,8 +68,25 @@ func (s *PracticeService) GetErrorQuestions(userID int64, category string) ([]*m
 
 	errorQuestions, err := s.errorQuestionDAO.GetErrorQuestionsWithDetails(userID, category)
 	if err != nil {
-		utils.Error("PracticeService", "获取错题失败", err, nil)
+		utils.Error("PracticeService", "获取错题失败", err, map[string]interface{}{
+			"user_id":  userID,
+			"category": category,
+		})
 		return nil, err
+	}
+
+	utils.Info("PracticeService", "获取错题记录数量", map[string]interface{}{
+		"user_id":  userID,
+		"category": category,
+		"count":    len(errorQuestions),
+	})
+
+	if len(errorQuestions) == 0 {
+		utils.Info("PracticeService", "用户在该类别没有错题记录", map[string]interface{}{
+			"user_id":  userID,
+			"category": category,
+		})
+		return []*models.Question{}, nil
 	}
 
 	// 将 ErrorQuestion 转换为 Question
@@ -83,7 +112,7 @@ func (s *PracticeService) GetErrorQuestions(userID int64, category string) ([]*m
 		questions = append(questions, question)
 	}
 
-	utils.Info("PracticeService", "获取错题成功", map[string]interface{}{
+	utils.Debug("PracticeService", "获取错题成功", map[string]interface{}{
 		"user_id":  userID,
 		"category": category,
 		"count":    len(questions),
@@ -213,7 +242,7 @@ func (s *PracticeService) SavePracticeProgress(userID int64, category string, in
 		return err
 	}
 
-	utils.Info("PracticeService", "保存练习进度成功", map[string]interface{}{
+	utils.Debug("PracticeService", "保存练习进度成功", map[string]interface{}{
 		"user_id":  userID,
 		"category": category,
 		"index":    index,
@@ -261,7 +290,7 @@ func (s *PracticeService) AddErrorQuestion(questionID int64, category string, us
 		return false, err
 	}
 
-	utils.Info("PracticeService", "添加错题成功", map[string]interface{}{
+	utils.Debug("PracticeService", "添加错题成功", map[string]interface{}{
 		"question_id": questionID,
 		"user_id":     userID,
 		"category":    category,
@@ -319,7 +348,7 @@ func (s *PracticeService) ResetProgress(userID int64, category string) error {
 		}
 	}
 
-	utils.Info("PracticeService", "重置用户练习进度成功", map[string]interface{}{
+	utils.Debug("PracticeService", "重置用户练习进度成功", map[string]interface{}{
 		"user_id":  userID,
 		"category": category,
 	})

@@ -4,6 +4,7 @@ import (
 	"crac_exam_go/backend/dao"
 	"crac_exam_go/backend/models"
 	"crac_exam_go/backend/utils"
+	"fmt"
 
 	"gorm.io/gorm"
 )
@@ -25,6 +26,17 @@ func NewFavoriteService(db *gorm.DB) *FavoriteService {
 // GetFavoriteQuestions 根据用户 ID 和分类获取收藏题目
 // Python 原版：get_favorite_questions(user_id, category) -> List[Question]
 func (s *FavoriteService) GetFavoriteQuestions(userID int64, category string) ([]*models.Question, error) {
+	// 输入验证
+	if userID <= 0 {
+		utils.Warn("FavoriteService", "无效的用户 ID", map[string]interface{}{"user_id": userID})
+		return nil, fmt.Errorf("无效的用户 ID")
+	}
+	validCategories := map[string]bool{"A": true, "B": true, "C": true}
+	if !validCategories[category] {
+		utils.Warn("FavoriteService", "无效的收藏类别", map[string]interface{}{"category": category})
+		return nil, fmt.Errorf("无效的类别：%s（仅支持 A/B/C）", category)
+	}
+
 	utils.Info("FavoriteService", "获取收藏题目", map[string]interface{}{
 		"user_id":  userID,
 		"category": category,
@@ -37,6 +49,20 @@ func (s *FavoriteService) GetFavoriteQuestions(userID int64, category string) ([
 		return nil, err
 	}
 
+	utils.Info("FavoriteService", "获取收藏记录数量", map[string]interface{}{
+		"user_id":  userID,
+		"category": category,
+		"count":    len(favoriteRecords),
+	})
+
+	if len(favoriteRecords) == 0 {
+		utils.Info("FavoriteService", "用户在该类别没有收藏记录", map[string]interface{}{
+			"user_id":  userID,
+			"category": category,
+		})
+		return []*models.Question{}, nil
+	}
+
 	// 获取题目 ID 列表
 	questionIDs := make([]int64, 0, len(favoriteRecords))
 	for _, record := range favoriteRecords {
@@ -45,6 +71,7 @@ func (s *FavoriteService) GetFavoriteQuestions(userID int64, category string) ([
 
 	// 根据 ID 列表获取题目对象
 	questions := make([]*models.Question, 0, len(questionIDs))
+	notFoundCount := 0
 	for _, qID := range questionIDs {
 		question, err := s.questionDAO.GetByID(qID)
 		if err != nil {
@@ -53,15 +80,41 @@ func (s *FavoriteService) GetFavoriteQuestions(userID int64, category string) ([
 			})
 			continue
 		}
-		if question != nil {
-			questions = append(questions, question)
+		if question == nil {
+			notFoundCount++
+			utils.Info("FavoriteService", "题目不存在（创建占位记录）", map[string]interface{}{
+				"question_id": qID,
+			})
+			// 创建占位题目，让前端显示记录存在但题目已删除
+			placeholder := &models.Question{
+				ID:   qID,
+				J:    "",
+				P:    "",
+				I:    "",
+				Q:    "[题目已被删除]",
+				T:    "",
+				A:    "",
+				B:    "",
+				C:    "",
+				D:    "",
+				F:    "",
+				LA:   0,
+				LB:   0,
+				LC:   0,
+				Type: 0,
+			}
+			questions = append(questions, placeholder)
+			continue
 		}
+		questions = append(questions, question)
 	}
 
 	utils.Debug("FavoriteService", "获取收藏题目成功", map[string]interface{}{
-		"user_id":  userID,
-		"category": category,
-		"count":    len(questions),
+		"user_id":      userID,
+		"category":     category,
+		"total_count":  len(favoriteRecords),
+		"result_count": len(questions),
+		"not_found":    notFoundCount,
 	})
 
 	return questions, nil
@@ -104,7 +157,7 @@ func (s *FavoriteService) AddFavoriteQuestion(userID int64, questionID int64, ca
 		return false, err
 	}
 
-	utils.Info("FavoriteService", "添加收藏题目成功", map[string]interface{}{
+	utils.Debug("FavoriteService", "添加收藏题目成功", map[string]interface{}{
 		"user_id":     userID,
 		"question_id": questionID,
 		"category":    category,
@@ -128,7 +181,7 @@ func (s *FavoriteService) RemoveFavoriteQuestion(userID int64, questionID int64)
 		return false, err
 	}
 
-	utils.Info("FavoriteService", "移除收藏题目成功", map[string]interface{}{
+	utils.Debug("FavoriteService", "移除收藏题目成功", map[string]interface{}{
 		"user_id":     userID,
 		"question_id": questionID,
 	})

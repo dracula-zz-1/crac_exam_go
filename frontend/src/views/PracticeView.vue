@@ -101,6 +101,14 @@ import { ElMessage } from 'element-plus'
 import { Back, ArrowLeft, ArrowRight, Star, StarFilled, View } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import { FavoriteService, PracticeService } from '@/api'
+import type { Question } from '@/types'
+
+// PracticeView 扩展的题目类型（含前端计算字段）
+interface PracticeQuestion extends Question {
+  hasImage?: boolean
+  imageBase64?: string
+  analysis?: string
+}
 
 // 定义 props
 const props = defineProps<{
@@ -108,31 +116,9 @@ const props = defineProps<{
   mode: 'practice' | 'error' | 'favorite'
 }>()
 
-interface Question {
-  id: number
-  J: string
-  P: string
-  I: string
-  Q: string
-  T: string
-  A: string
-  B: string
-  C: string
-  D: string
-  F: string
-  LA: number
-  LB: number
-  LC: number
-  type: number
-  user_id?: number
-  hasImage?: boolean
-  imageBase64?: string
-  analysis?: string
-}
-
 const userStore = useUserStore()
 
-const currentQuestion = ref<Question | null>(null)
+const currentQuestion = ref<PracticeQuestion | null>(null)
 const currentIndex = ref(0)
 const totalQuestions = ref(0)
 const userAnswer = ref('')

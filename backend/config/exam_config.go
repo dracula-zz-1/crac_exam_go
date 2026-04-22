@@ -1,5 +1,7 @@
 package config
 
+import "sync"
+
 // ExamConfig 考试配置结构
 type ExamConfig struct {
 	Total       int `json:"total"`        // 总题数
@@ -9,9 +11,9 @@ type ExamConfig struct {
 	PassScore   int `json:"pass_score"`   // 通过分数（答对题数）
 }
 
-// EXAM_CONFIG 考试配置（与 Python 版本完全一致）
+// 默认考试配置（与 Python 版本完全一致）
 // 来源：src/configs/config.py 第 40-44 行
-var EXAM_CONFIG = map[string]ExamConfig{
+var defaultExamConfigs = map[string]ExamConfig{
 	"A": {
 		Total:       40,
 		Single:      32,
@@ -35,13 +37,48 @@ var EXAM_CONFIG = map[string]ExamConfig{
 	},
 }
 
+// EXAM_CONFIG 运行时考试配置（线程安全）
+var (
+	EXAM_CONFIG     = make(map[string]ExamConfig)
+	examConfigMutex sync.RWMutex
+)
+
+// init 初始化默认考试配置
+func init() {
+	for k, v := range defaultExamConfigs {
+		EXAM_CONFIG[k] = v
+	}
+}
+
 // GetExamConfig 获取指定类别的考试配置
 func GetExamConfig(category string) ExamConfig {
+	examConfigMutex.RLock()
+	defer examConfigMutex.RUnlock()
+
 	if config, exists := EXAM_CONFIG[category]; exists {
 		return config
 	}
 	// 默认返回 A 类配置
 	return EXAM_CONFIG["A"]
+}
+
+// SetExamConfig 设置指定类别的考试配置（运行时可修改）
+func SetExamConfig(category string, config ExamConfig) {
+	examConfigMutex.Lock()
+	defer examConfigMutex.Unlock()
+	EXAM_CONFIG[category] = config
+}
+
+// GetAllExamConfigs 获取所有考试配置
+func GetAllExamConfigs() map[string]ExamConfig {
+	examConfigMutex.RLock()
+	defer examConfigMutex.RUnlock()
+
+	result := make(map[string]ExamConfig, len(EXAM_CONFIG))
+	for k, v := range EXAM_CONFIG {
+		result[k] = v
+	}
+	return result
 }
 
 // QuestionConfig 题目相关配置

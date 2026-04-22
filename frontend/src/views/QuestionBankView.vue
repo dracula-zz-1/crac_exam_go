@@ -88,7 +88,7 @@
         <el-form-item label="编号">
           <span style="font-size: 14px;">{{ formatQuestionNumber(editingQuestion) }}</span>
           <span style="margin-left: 20px; font-size: 14px;">
-            类型：{{ editingQuestion.type === '2' ? '多选题' : '单选题' }}
+            类型：{{ editingQuestion.type === 2 ? '多选题' : '单选题' }}
           </span>
           <span style="margin-left: 20px; font-size: 14px;">
             <el-checkbox v-model="editingQuestion.LA" :true-label="1" :false-label="0" style="margin-left: 10px;">A 类</el-checkbox>
@@ -188,25 +188,7 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { SettingsService } from '@/api'
-import type { models } from '../../wailsjs/go/models'
-
-interface Question {
-  id: number
-  J: string
-  P: string
-  I: string
-  Q: string
-  T: string
-  A: string
-  B: string
-  C: string
-  D: string
-  F: string
-  LA: string | number
-  LB: string | number
-  LC: string | number
-  type: string
-}
+import type { Question } from '@/types'
 
 const loading = ref(false)
 const tableData = ref<Question[]>([])
@@ -234,33 +216,20 @@ const loadTableData = async () => {
   try {
     const result = await SettingsService.GetQuestionsPage(
       pageNum.value,
-      5, // 固定每页 5 条
+      5,
       searchQuery.value,
       filterLA.value,
       filterLB.value,
       filterLC.value
     )
-    // SettingsService.GetQuestionsPage 返回的是 { data: models.Question[], total: number }
     if (result && result.data && Array.isArray(result.data)) {
-      // 转换类型以匹配本地 Question 接口
-      tableData.value = result.data.map((q: models.Question) => ({
-        id: q.id,
-        J: q.J,
-        P: q.P,
-        I: q.I,
-        Q: q.Q,
-        T: q.T,
-        A: q.A,
-        B: q.B,
-        C: q.C,
-        D: q.D,
-        F: q.F,
+      tableData.value = result.data.map((q: any) => ({
+        ...q,
         LA: q.LA === 1 ? 1 : 0,
         LB: q.LB === 1 ? 1 : 0,
         LC: q.LC === 1 ? 1 : 0,
-        type: q.type.toString()
+        type: q.type ? Number(q.type) : 0,
       }))
-      // 总数从后端返回的 total 字段获取
       total.value = result.total
     } else {
       tableData.value = []
@@ -441,7 +410,7 @@ const updateAnswer = (_option: string) => {
   
   // 根据选中数量确定单选还是多选
   const selectedCount = answers.length
-  editingQuestion.value.type = selectedCount > 1 ? '2' : '1'
+  editingQuestion.value.type = selectedCount > 1 ? 2 : 1
 }
 
 const handleSaveEdit = async () => {

@@ -1,11 +1,15 @@
 package utils
 
 import (
-	"crac_exam_go/backend/config"
+	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
+
+	"crac_exam_go/backend/config"
 
 	"github.com/sirupsen/logrus"
 	"gopkg.in/natefinch/lumberjack.v2"
@@ -16,16 +20,63 @@ var (
 	loggerOnce sync.Once
 )
 
+// CustomFormatter 自定义日志格式
+type CustomFormatter struct{}
+
+// Format 格式化日志输出
+func (f *CustomFormatter) Format(entry *logrus.Entry) ([]byte, error) {
+	var b *bytes.Buffer
+	if entry.Buffer != nil {
+		b = entry.Buffer
+	} else {
+		b = &bytes.Buffer{}
+	}
+
+	// 级别（小写）
+	level := entry.Level.String()
+	b.WriteString(fmt.Sprintf("[%s] ", level))
+
+	// 时间
+	b.WriteString(entry.Time.Format("2006-01-02 15:04:05"))
+	b.WriteString(" ")
+
+	// 模块名
+	if module, ok := entry.Data["module"]; ok {
+		b.WriteString(fmt.Sprintf("%s ", module))
+		delete(entry.Data, "module")
+	}
+
+	// 消息
+	b.WriteString(entry.Message)
+
+	// 其他字段（按字母排序）
+	if len(entry.Data) > 0 {
+		keys := make([]string, 0, len(entry.Data))
+		for k := range entry.Data {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+
+		b.WriteString(" ")
+		for i, key := range keys {
+			if i > 0 {
+				b.WriteString(" ")
+			}
+			b.WriteString(fmt.Sprintf("%s=%v", key, entry.Data[key]))
+		}
+	}
+
+	b.WriteString("\n")
+	return b.Bytes(), nil
+}
+
 // GetLogger 获取全局日志实例
 func GetLogger() *logrus.Logger {
 	loggerOnce.Do(func() {
 		logger = logrus.New()
 
-		// 设置日志格式
-		logger.SetFormatter(&logrus.TextFormatter{
-			FullTimestamp:   true,
-			TimestampFormat: "2006-01-02 15:04:05",
-		})
+		// 设置自定义日志格式
+		logger.SetFormatter(&CustomFormatter{})
 
 		// 同时输出到控制台和文件
 		logFile := filepath.Join(config.GetLogPath(), "backend.log")
@@ -40,7 +91,7 @@ func GetLogger() *logrus.Logger {
 		multiWriter := io.MultiWriter(os.Stdout, fileWriter)
 		logger.SetOutput(multiWriter)
 
-		// 设置日志级别为 Info，减少日志输出
+		// 设置日志级别
 		level := logrus.InfoLevel
 		if os.Getenv("APP_ENV") == "development" {
 			level = logrus.DebugLevel

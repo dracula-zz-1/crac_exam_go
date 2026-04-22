@@ -132,6 +132,13 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Back, Document, Check, ArrowLeft } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import { SettingsService, ExamService } from '@/api'
+import type { Question } from '@/types'
+
+// ExamView 扩展的题目类型（含前端计算字段）
+interface ExamQuestion extends Question {
+  hasImage: boolean
+  imageBase64?: string
+}
 
 // 定义 emit
 const emit = defineEmits<{
@@ -140,27 +147,13 @@ const emit = defineEmits<{
 
 const router = useRouter()
 
-interface Question {
-  id: number
-  J: string
-  Q: string
-  T: string
-  A: string
-  B: string
-  C: string
-  D: string
-  type: number
-  hasImage: boolean
-  imageBase64?: string
-}
-
 const userStore = useUserStore()
 
 const examID = ref<number>(0)
 const startTime = ref<number>(Date.now())
 const examStarted = ref(false)
-const questions = ref<Question[]>([])
-const currentQuestion = ref<Question | null>(null)
+const questions = ref<ExamQuestion[]>([])
+const currentQuestion = ref<ExamQuestion | null>(null)
 const currentIndex = ref(0)
 const totalQuestions = ref(0)
 const userAnswers = ref<Record<number, string>>({})

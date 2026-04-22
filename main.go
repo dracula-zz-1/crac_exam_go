@@ -30,6 +30,9 @@ func main() {
 	// 设置全局数据库实例供 services 使用
 	services.SetDB(db)
 
+	// 创建服务实例
+	importService := services.NewImportService(db)
+
 	// 创建应用实例
 	err = wails.Run(&options.App{
 		Title:         "业余无线电模拟考试系统",
@@ -41,7 +44,7 @@ func main() {
 		},
 		BackgroundColour: &options.RGBA{R: 255, G: 255, B: 255, A: 255},
 		OnStartup: func(ctx context.Context) {
-			// 数据库已在 main 中初始化
+			importService.SetContext(ctx)
 		},
 		OnShutdown: func(ctx context.Context) {
 			// 关闭数据库连接
@@ -50,14 +53,14 @@ func main() {
 			}
 		},
 		Bind: []interface{}{
-			services.NewUserService(services.GetDB()),
-			services.NewSettingsService(services.GetDB()),
-			services.NewQuestionsBankService(services.GetDB()),
-			services.NewExamService(services.GetDB()),
-			services.NewPracticeService(services.GetDB()),
-			services.NewFavoriteService(services.GetDB()),
-			services.NewStatisticsService(services.GetDB()),
-			services.NewImportService(services.GetDB()),
+			services.NewUserService(db),
+			services.NewSettingsService(db),
+			services.NewQuestionsBankService(db),
+			services.NewExamService(db),
+			services.NewPracticeService(db),
+			services.NewFavoriteService(db),
+			services.NewStatisticsService(db),
+			importService,
 		},
 	})
 

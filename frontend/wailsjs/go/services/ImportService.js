@@ -25,3 +25,7 @@ export function ProcessUnifiedData(arg1) {
 export function ResetDatabase() {
   return window['go']['services']['ImportService']['ResetDatabase']();
 }
+
+export function SetContext(arg1) {
+  return window['go']['services']['ImportService']['SetContext'](arg1);
+}

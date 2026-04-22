@@ -241,30 +241,6 @@ export const PracticeService = {
       console.error('PracticeService.ResetProgress error:', error)
       throw error
     }
-  },
-  
-  SubmitAnswer: async (questionID: number, userAnswer: string): Promise<any> => {
-    try {
-      // 后端没有 SubmitAnswer 方法，需要前端自己判断
-      return {
-        question_id: questionID,
-        user_answer: userAnswer,
-        is_correct: true // TODO: 需要后端实现
-      }
-    } catch (error) {
-      console.error('PracticeService.SubmitAnswer error:', error)
-      throw error
-    }
-  },
-  
-  GetNextQuestion: async (currentQuestionID: number): Promise<models.Question> => {
-    try {
-      // 后端没有 GetNextQuestion 方法，前端自己处理
-      return currentQuestionID as any // TODO: 需要实现
-    } catch (error) {
-      console.error('PracticeService.GetNextQuestion error:', error)
-      throw error
-    }
   }
 }
 

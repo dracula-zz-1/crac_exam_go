@@ -267,22 +267,51 @@ func (dao *ErrorQuestionDAO) GetCount() (int64, error) {
 
 // GetErrorQuestionsWithDetails 根据用户 ID 和类别获取错题，并关联查询题目详情
 func (dao *ErrorQuestionDAO) GetErrorQuestionsWithDetails(userID int64, category string) ([]*models.ErrorQuestion, error) {
+	// 先查询错题记录数量
+	var errorCount int64
+	countQuery := `SELECT COUNT(*) FROM error_questions WHERE user_id = ? AND category = ?`
+	if err := dao.db.Raw(countQuery, userID, category).Scan(&errorCount).Error; err != nil {
+		utils.Error("ErrorQuestionDAO", "查询错题数量失败", err, map[string]interface{}{
+			"user_id":  userID,
+			"category": category,
+		})
+		return nil, err
+	}
+	utils.Info("ErrorQuestionDAO", "错题记录数量", map[string]interface{}{
+		"user_id":     userID,
+		"category":    category,
+		"error_count": errorCount,
+	})
+
+	// 如果错题数量为0，直接返回
+	if errorCount == 0 {
+		return []*models.ErrorQuestion{}, nil
+	}
+
+	// 使用 LEFT JOIN 查询，即使题目已被删除也能显示错题记录
 	query := `
 		SELECT 
 			eq.id, eq.question_id, eq.category, eq.user_id, eq.created_at,
-			q.J, q.P, q.I, q.Q, q.T, q.A, q.B, q.C, q.D, q.F, q.LA, q.LB, q.LC, q.type
+			COALESCE(q.J, ''), COALESCE(q.P, ''), COALESCE(q.I, ''), COALESCE(q.Q, ''), COALESCE(q.T, ''),
+			COALESCE(q.A, ''), COALESCE(q.B, ''), COALESCE(q.C, ''), COALESCE(q.D, ''), COALESCE(q.F, ''),
+			COALESCE(q.LA, 0), COALESCE(q.LB, 0), COALESCE(q.LC, 0), COALESCE(q.type, 0)
 		FROM error_questions eq
-		INNER JOIN questions q ON eq.question_id = q.id
+		LEFT JOIN questions q ON eq.question_id = q.id
 		WHERE eq.user_id = ? AND eq.category = ?
 	`
 
 	rows, err := dao.db.Raw(query, userID, category).Rows()
 	if err != nil {
+		utils.Error("ErrorQuestionDAO", "执行错题查询失败", err, map[string]interface{}{
+			"user_id":  userID,
+			"category": category,
+		})
 		return nil, err
 	}
 	defer rows.Close()
 
 	var errorQuestions []*models.ErrorQuestion
+	var orphanCount int64
 	for rows.Next() {
 		eq := &models.ErrorQuestion{}
 		var j, p, i, q_text, t, a, b, c, d, f string
@@ -294,7 +323,17 @@ func (dao *ErrorQuestionDAO) GetErrorQuestionsWithDetails(userID int64, category
 			&a, &b, &c, &d, &f,
 			&la, &lb, &lc, &questionType)
 		if err != nil {
+			utils.Error("ErrorQuestionDAO", "扫描错题行失败", err, map[string]interface{}{
+				"user_id":  userID,
+				"category": category,
+			})
 			continue
+		}
+
+		// 如果题目字段为空，说明题目已被删除（孤立记录）
+		if q_text == "" {
+			orphanCount++
+			eq.Q = "[题目已被删除]"
 		}
 
 		eq.J = j
@@ -315,10 +354,20 @@ func (dao *ErrorQuestionDAO) GetErrorQuestionsWithDetails(userID int64, category
 		errorQuestions = append(errorQuestions, eq)
 	}
 
-	utils.Debug("ErrorQuestionDAO", "获取用户类别错题详情成功", map[string]interface{}{
-		"user_id":  userID,
-		"category": category,
-		"count":    len(errorQuestions),
+	if orphanCount > 0 {
+		utils.Info("ErrorQuestionDAO", "发现孤立错题记录（题目已被删除，将在下次清理题库时自动清除）", map[string]interface{}{
+			"user_id":     userID,
+			"category":    category,
+			"orphan_count": orphanCount,
+		})
+	}
+
+	utils.Info("ErrorQuestionDAO", "获取用户类别错题详情成功", map[string]interface{}{
+		"user_id":      userID,
+		"category":     category,
+		"error_count":  errorCount,
+		"result_count": len(errorQuestions),
+		"orphan_count": orphanCount,
 	})
 
 	return errorQuestions, nil

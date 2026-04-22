@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"crac_exam_go/backend/dao"
 	"crac_exam_go/backend/models"
 	"crac_exam_go/backend/utils"
@@ -12,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 	"gorm.io/gorm"
 )
 
@@ -19,6 +21,7 @@ import (
 type ImportService struct {
 	questionDAO *dao.QuestionDAO
 	db          *gorm.DB
+	ctx         context.Context
 }
 
 // ImportResult 导入结果
@@ -35,11 +38,29 @@ func NewImportService(db *gorm.DB) *ImportService {
 	return &ImportService{
 		questionDAO: dao.NewQuestionDAO(db),
 		db:          db,
+		ctx:         nil,
 	}
+}
+
+// SetContext 设置 Wails 上下文（用于事件推送）
+func (s *ImportService) SetContext(ctx context.Context) {
+	s.ctx = ctx
+}
+
+// emitProgress 发送导入进度事件到前端
+func (s *ImportService) emitProgress(percent int, message string) {
+	if s.ctx == nil {
+		return
+	}
+	runtime.EventsEmit(s.ctx, "import-progress", map[string]interface{}{
+		"percent": percent,
+		"message": message,
+	})
 }
 
 // ResetDatabase 重置数据库
 func (s *ImportService) ResetDatabase() (bool, error) {
+	s.emitProgress(5, "正在清空旧题库...")
 	utils.Info("ImportService", "开始重置数据库", nil)
 
 	// 清空题库表
@@ -72,9 +93,11 @@ func (s *ImportService) ImportQuestions(questions []*models.Question) (*ImportRe
 	}
 
 	// 重置数据库
+	s.emitProgress(15, "正在准备导入数据...")
 	success, err := s.ResetDatabase()
 	if err != nil || !success {
 		utils.Error("ImportService", "重置数据库失败", err, nil)
+		s.emitProgress(0, "重置题库失败")
 		return &ImportResult{
 			Success:       false,
 			Message:       "重置题库表失败",
@@ -85,9 +108,11 @@ func (s *ImportService) ImportQuestions(questions []*models.Question) (*ImportRe
 	}
 
 	// 批量插入题目
+	s.emitProgress(30, fmt.Sprintf("正在导入题目数据（共 %d 道）...", total))
 	err = s.questionDAO.BatchInsert(questions)
 	if err != nil {
 		utils.Error("ImportService", "批量插入题目失败", err, nil)
+		s.emitProgress(0, "导入失败")
 		return &ImportResult{
 			Success:       false,
 			Message:       "批量插入题目失败",
@@ -97,9 +122,7 @@ func (s *ImportService) ImportQuestions(questions []*models.Question) (*ImportRe
 		}, err
 	}
 
-	utils.Info("ImportService", "题库导入完成", map[string]interface{}{
-		"total": total,
-	})
+	s.emitProgress(90, "正在生成统计数据...")
 
 	// 统计信息
 	stats := calculateImportStats(questions)
@@ -110,6 +133,8 @@ func (s *ImportService) ImportQuestions(questions []*models.Question) (*ImportRe
 		statsInterface[k] = v
 	}
 	utils.Info("ImportService", "统计信息", statsInterface)
+
+	s.emitProgress(100, "导入完成！")
 
 	return &ImportResult{
 		Success:       true,
@@ -215,6 +240,8 @@ func (s *ImportService) ProcessUnifiedData(filePath string) (*ImportResult, erro
 		"file_path": filePath,
 	})
 
+	s.emitProgress(2, "正在读取文件...")
+
 	// 验证文件大小
 	fileInfo, err := os.Stat(filePath)
 	if err != nil {
@@ -222,9 +249,10 @@ func (s *ImportService) ProcessUnifiedData(filePath string) (*ImportResult, erro
 		return nil, fmt.Errorf("获取文件信息失败：%v", err)
 	}
 	if fileInfo.Size() > 100*1024*1024 { // 100MB限制
-		utils.Error("ImportService", "文件过大", nil, map[string]interface{}{
+		utils.Warn("ImportService", "文件过大", map[string]interface{}{
 			"size": fileInfo.Size(),
 		})
+		s.emitProgress(0, "文件过大")
 		return &ImportResult{
 			Success:       false,
 			Message:       "文件过大，最大支持 100MB",
@@ -247,7 +275,7 @@ func (s *ImportService) ProcessUnifiedData(filePath string) (*ImportResult, erro
 	}
 
 	if !validExts[fileExt] {
-		utils.Error("ImportService", "不支持的文件类型", nil, map[string]interface{}{
+		utils.Warn("ImportService", "不支持的文件类型", map[string]interface{}{
 			"extension": fileExt,
 		})
 		return &ImportResult{

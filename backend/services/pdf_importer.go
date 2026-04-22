@@ -306,14 +306,7 @@ func (i *PDFImporter) readTotalPDFTextParallel(pdfData []byte) (string, error) {
 			globalSem <- struct{}{}
 			defer func() { <-globalSem }()
 
-			doc2, err := fitz.NewFromMemory(pdfData)
-			if err != nil {
-				resultChan <- pageResult{pageNum: pn, err: err}
-				return
-			}
-			defer doc2.Close()
-
-			text, err := doc2.Text(pn)
+			text, err := doc.Text(pn)
 			if err != nil {
 				resultChan <- pageResult{pageNum: pn, err: err}
 				return
@@ -398,14 +391,7 @@ func (i *PDFImporter) processCategoryPDFParallel(pdfData []byte, name string) ([
 			globalSem <- struct{}{}
 			defer func() { <-globalSem }()
 
-			doc2, err := fitz.NewFromMemory(pdfData)
-			if err != nil {
-				resultChan <- pageResult{pageNum: pn, err: err}
-				return
-			}
-			defer doc2.Close()
-
-			text, err := doc2.Text(pn)
+			text, err := doc.Text(pn)
 			if err != nil {
 				resultChan <- pageResult{pageNum: pn, err: err}
 				return

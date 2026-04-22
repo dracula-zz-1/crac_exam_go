@@ -81,6 +81,25 @@ func NewExamService(db *gorm.DB) *ExamService {
 // CreateExam 创建一场新考试
 // Python 原版：create_exam(user_id, category) -> (exam_id, questions, config)
 func (s *ExamService) CreateExam(userID int64, category string) (*ExamStartResponse, error) {
+	// 验证用户 ID
+	if userID <= 0 {
+		utils.Warn("ExamService", "无效的用户 ID", map[string]interface{}{
+			"user_id": userID,
+		})
+		return nil, fmt.Errorf("无效的用户 ID")
+	}
+
+	// 验证类别参数
+	if category == "" {
+		utils.Warn("ExamService", "考试类别不能为空", nil)
+		return nil, fmt.Errorf("考试类别不能为空")
+	}
+	if category != "A" && category != "B" && category != "C" {
+		utils.Warn("ExamService", "无效的考试类别", map[string]interface{}{
+			"category": category,
+		})
+		return nil, fmt.Errorf("无效的考试类别：%s（仅支持 A/B/C）", category)
+	}
 	// 输入验证
 	if userID <= 0 {
 		return nil, fmt.Errorf("无效的用户 ID：%d", userID)
@@ -128,8 +147,8 @@ func (s *ExamService) CreateExam(userID int64, category string) (*ExamStartRespo
 
 	// 检查是否有足够的题目
 	if actualSingle+actualMultiple == 0 {
-		utils.Error("ExamService", "没有足够的题目", nil, nil)
-		return nil, fmt.Errorf("题库中没有足够的题目")
+		utils.Error("ExamService", "题库中没有足够的题目", fmt.Errorf("类别 %s 题目数量为0", category), nil)
+		return nil, fmt.Errorf("题库中没有足够的题目（类别: %s）", category)
 	}
 
 	// 更新配置
@@ -163,7 +182,7 @@ func (s *ExamService) CreateExam(userID int64, category string) (*ExamStartRespo
 
 	// 检查考试记录是否创建成功
 	if examID == 0 {
-		utils.Error("ExamService", "创建考试记录失败", nil, nil)
+		utils.Error("ExamService", "创建考试记录返回ID为0", fmt.Errorf("数据库插入失败"), nil)
 		return nil, fmt.Errorf("创建考试记录失败")
 	}
 
@@ -547,6 +566,7 @@ func (s *ExamService) InvalidateExam(examID int64) error {
 			utils.Error("ExamService", "发生 panic，事务已回滚", fmt.Errorf("%v", r), map[string]interface{}{
 				"exam_id": examID,
 			})
+			panic(r)
 		}
 	}()
 
