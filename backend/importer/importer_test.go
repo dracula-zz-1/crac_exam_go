@@ -15,7 +15,25 @@ import (
 	"github.com/signintech/gopdf"
 )
 
-const testFont = `C:\Windows\Fonts\simhei.ttf`
+// testFont 返回一个可用的中文字体路径。
+// 英文版 Windows（例如 GitHub Actions 的 windows-latest）没有安装中文字体，
+// 这时跳过依赖「生成中文 PDF」的用例，其余逻辑仍由其它用例覆盖。
+func testFont(t *testing.T) string {
+	t.Helper()
+	for _, path := range []string{
+		`C:\Windows\Fonts\simhei.ttf`,
+		`C:\Windows\Fonts\simsun.ttf`,
+		`C:\Windows\Fonts\msyh.ttf`,
+		`C:\Windows\Fonts\Deng.ttf`,
+		`C:\Windows\Fonts\simkai.ttf`,
+	} {
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+	}
+	t.Skip("系统中没有中文字体（simhei/msyh 等），跳过需要生成中文 PDF 的测试")
+	return ""
+}
 
 func TestParseQuestionsBasic(t *testing.T) {
 	text := strings.Join([]string{
@@ -332,7 +350,7 @@ func makeTextPDF(t *testing.T, path string, lines []string) {
 	t.Helper()
 	var pdf gopdf.GoPdf
 	pdf.Start(gopdf.Config{PageSize: *gopdf.PageSizeA4})
-	if err := pdf.AddTTFFont("simhei", testFont); err != nil {
+	if err := pdf.AddTTFFont("simhei", testFont(t)); err != nil {
 		t.Fatalf("add font: %v", err)
 	}
 	if err := pdf.SetFont("simhei", "", 11); err != nil {
@@ -366,7 +384,7 @@ func makeImagesPDF(t *testing.T, path string, tokens []string) {
 	t.Helper()
 	var pdf gopdf.GoPdf
 	pdf.Start(gopdf.Config{PageSize: *gopdf.PageSizeA4})
-	if err := pdf.AddTTFFont("simhei", testFont); err != nil {
+	if err := pdf.AddTTFFont("simhei", testFont(t)); err != nil {
 		t.Fatalf("add font: %v", err)
 	}
 	if err := pdf.SetFont("simhei", "", 12); err != nil {

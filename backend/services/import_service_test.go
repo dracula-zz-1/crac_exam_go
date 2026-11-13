@@ -257,11 +257,29 @@ func makeTestBankZip(t *testing.T, dir string, questionCount int) string {
 	return zipPath
 }
 
+// cjkFont 返回一个可用的中文字体路径；没有则跳过依赖生成中文 PDF 的用例。
+func cjkFont(t *testing.T) string {
+	t.Helper()
+	for _, path := range []string{
+		`C:\Windows\Fonts\simhei.ttf`,
+		`C:\Windows\Fonts\simsun.ttf`,
+		`C:\Windows\Fonts\msyh.ttf`,
+		`C:\Windows\Fonts\Deng.ttf`,
+		`C:\Windows\Fonts\simkai.ttf`,
+	} {
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+	}
+	t.Skip("系统中没有中文字体（simhei/msyh 等），跳过需要生成中文 PDF 的测试")
+	return ""
+}
+
 func writePDF(t *testing.T, path string, lines []string) {
 	t.Helper()
 	var p gopdf.GoPdf
 	p.Start(gopdf.Config{PageSize: *gopdf.PageSizeA4})
-	if err := p.AddTTFFont("simhei", `C:\Windows\Fonts\simhei.ttf`); err != nil {
+	if err := p.AddTTFFont("simhei", cjkFont(t)); err != nil {
 		t.Fatalf("font: %v", err)
 	}
 	p.AddPage()
@@ -290,7 +308,7 @@ func writeImagePDF(t *testing.T, path string, tokens []string) {
 	t.Helper()
 	var p gopdf.GoPdf
 	p.Start(gopdf.Config{PageSize: *gopdf.PageSizeA4})
-	if err := p.AddTTFFont("simhei", `C:\Windows\Fonts\simhei.ttf`); err != nil {
+	if err := p.AddTTFFont("simhei", cjkFont(t)); err != nil {
 		t.Fatalf("font: %v", err)
 	}
 	p.AddPage()
