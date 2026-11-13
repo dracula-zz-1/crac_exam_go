@@ -258,6 +258,8 @@ function mockUpdateStatus(): BankUpdateStatus {
   };
 }
 
+let mockDataDir = "C:\\Users\\Demo\\AppData\\Roaming\\CracExamV3";
+
 const appUpdateState: AppUpdateStatus = {
   checked: false,
   checking: false,
@@ -269,6 +271,7 @@ const appUpdateState: AppUpdateStatus = {
   releaseUrl: "https://github.com/dracula-zz-1/crac_exam_go/releases",
   publishedAt: "",
   notes: "",
+  source: "github",
   repo: "dracula-zz-1/crac_exam_go",
   asset: null,
   assets: [],
@@ -775,6 +778,25 @@ export const mockApi = {
     await wait(40);
   },
 
+  async setAppUpdateSource(source: string): Promise<void> {
+    const next = source === "gitee" ? "gitee" : "github";
+    appUpdateState.source = next;
+    appUpdateState.repo =
+      next === "gitee" ? "dracula_zz/crac_exam_go" : "dracula-zz-1/crac_exam_go";
+    appUpdateState.releaseUrl =
+      next === "gitee"
+        ? "https://gitee.com/dracula_zz/crac_exam_go/releases"
+        : "https://github.com/dracula-zz-1/crac_exam_go/releases";
+    appUpdateState.checked = false;
+    appUpdateState.available = false;
+    appUpdateState.latestVersion = "";
+    appUpdateState.asset = null;
+    appUpdateState.assets = [];
+    appUpdateState.message = next === "gitee" ? "更新通道已切换为 Gitee 镜像" : "更新通道已切换为 GitHub";
+    appUpdateState.error = "";
+    await wait(40);
+  },
+
   async checkAppUpdate(): Promise<AppUpdateStatus> {
     await wait(700);
     appUpdateState.checked = true;
@@ -875,7 +897,24 @@ export const mockApi = {
       description: "业余无线电台操作技术能力验证模拟考试系统",
       copyright: "Copyright © 2024-2026 BA4RHH",
       goVersion: "go1.26 (mock)",
-      dataDir: "（浏览器演示模式，无本地数据库）",
+      dataDir: mockDataDir,
     };
+  },
+
+  async pickDataDir(): Promise<string> {
+    await wait(60);
+    return mockDataDir;
+  },
+
+  async setDataDir(dir: string, migrate: boolean): Promise<string> {
+    mockDataDir = dir;
+    await wait(60);
+    return `数据目录已设为 ${dir}${migrate ? "（已复制现有数据）" : "（空数据）"}，重启应用后生效`;
+  },
+
+  async resetDataDir(): Promise<string> {
+    mockDataDir = "C:\\Users\\Demo\\AppData\\Roaming\\CracExamV3";
+    await wait(60);
+    return "已恢复默认数据目录，重启应用后生效";
   },
 };

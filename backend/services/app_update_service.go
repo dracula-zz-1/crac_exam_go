@@ -30,13 +30,19 @@ import (
 
 const (
 	githubAPIBase = "https://api.github.com"
+	giteeAPIBase  = "https://gitee.com/api/v5"
 	maxUpdateSize = int64(1 << 30) // 1 GiB，防止异常 Release 附件占满磁盘
+
+	// UpdateSourceGitHub / UpdateSourceGitee 是应用更新可选的两个下载通道。
+	UpdateSourceGitHub = "github"
+	UpdateSourceGitee  = "gitee"
 )
 
 var (
 	githubRepoRe    = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 	updateNameRe    = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
 	githubHostNames = []string{"github.com", "api.github.com"}
+	giteeHostNames  = []string{"gitee.com", "www.gitee.com"}
 	updateUserAgent = "crac-exam-v3/" + config.AppVersion
 )
 
@@ -57,7 +63,17 @@ type githubRelease struct {
 	Assets      []githubReleaseAsset `json:"assets"`
 }
 
-// AppUpdateService 通过 GitHub Release 检查、下载并启动应用更新。
+// giteeRelease 是 Gitee OpenAPI 的 Release 结构，字段比 GitHub 少。
+type giteeRelease struct {
+	TagName     string               `json:"tag_name"`
+	Name        string               `json:"name"`
+	Body        string               `json:"body"`
+	Prerelease  bool                 `json:"prerelease"`
+	CreatedAt   string               `json:"created_at"`
+	Assets      []githubReleaseAsset `json:"assets"`
+}
+
+// AppUpdateService 通过 GitHub 或 Gitee Release 检查、下载并启动应用更新。
 type AppUpdateService struct {
 	db          *sql.DB
 	mu          sync.Mutex
@@ -65,16 +81,19 @@ type AppUpdateService struct {
 	checking    bool
 	downloading bool
 	client      *http.Client
-	apiBase     string
+	apiBase     string // GitHub API 基址（测试可覆盖）
+	giteeBase   string // Gitee API 基址（测试可覆盖）
 }
 
 func NewAppUpdateService(db *sql.DB) *AppUpdateService {
 	return &AppUpdateService{
-		db:      db,
-		client:  newUpdateHTTPClient(30 * time.Second),
-		apiBase: githubAPIBase,
+		db:        db,
+		client:    newUpdateHTTPClient(30 * time.Second),
+		apiBase:   githubAPIBase,
+		giteeBase: giteeAPIBase,
 		status: models.AppUpdateStatus{
 			CurrentVersion: config.AppVersion,
+			Source:         UpdateSourceGitHub,
 			Repo:           config.DefaultGitHubRepo,
 			Assets:         []models.AppReleaseAsset{},
 			Message:        "尚未检查更新",
@@ -87,6 +106,7 @@ func (s *AppUpdateService) ServiceName() string { return "AppUpdateService" }
 func (s *AppUpdateService) ServiceStartup(ctx context.Context, options application.ServiceOptions) error {
 	s.mu.Lock()
 	s.status.CurrentVersion = config.AppVersion
+	s.status.Source = s.source()
 	s.status.Repo = s.repo()
 	if s.status.Assets == nil {
 		s.status.Assets = []models.AppReleaseAsset{}
@@ -103,13 +123,13 @@ func (s *AppUpdateService) GetStatus() *models.AppUpdateStatus {
 	return &st
 }
 
-// SetRepo 修改应用更新使用的 GitHub 仓库（owner/repo）。
+// SetRepo 修改当前更新通道使用的仓库（owner/repo）。
 func (s *AppUpdateService) SetRepo(repo string) error {
 	repo = normalizeGitHubRepo(repo)
 	if !githubRepoRe.MatchString(repo) {
-		return errors.New("GitHub 仓库格式应为 owner/repo")
+		return errors.New("仓库格式应为 owner/repo")
 	}
-	if err := store.SetMeta(s.db, store.MetaAppGitHubRepo, repo); err != nil {
+	if err := store.SetMeta(s.db, repoMetaKey(s.source()), repo); err != nil {
 		return err
 	}
 	s.mu.Lock()
@@ -118,6 +138,32 @@ func (s *AppUpdateService) SetRepo(repo string) error {
 	s.status.Available = false
 	s.status.Error = ""
 	s.status.Message = "更新源已保存"
+	s.mu.Unlock()
+	s.emitStatus()
+	return nil
+}
+
+// SetSource 切换应用更新通道（GitHub / Gitee）。
+func (s *AppUpdateService) SetSource(source string) error {
+	src := normalizeUpdateSource(source)
+	if err := store.SetMeta(s.db, store.MetaAppUpdateSource, src); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.status.Source = src
+	s.status.Repo = s.repo()
+	s.status.Checked = false
+	s.status.Checking = false
+	s.status.Available = false
+	s.status.LatestVersion = ""
+	s.status.ReleaseName = ""
+	s.status.ReleaseURL = ""
+	s.status.PublishedAt = ""
+	s.status.Notes = ""
+	s.status.Asset = nil
+	s.status.Assets = []models.AppReleaseAsset{}
+	s.status.Error = ""
+	s.status.Message = "更新通道已切换为 " + updateSourceLabel(src)
 	s.mu.Unlock()
 	s.emitStatus()
 	return nil
@@ -145,6 +191,7 @@ func (s *AppUpdateService) Check() (*models.AppUpdateStatus, error) {
 	s.status.Checking = false
 	s.status.Checked = true
 	s.status.CurrentVersion = config.AppVersion
+	s.status.Source = s.source()
 	s.status.Repo = s.repo()
 	if err != nil {
 		s.status.Available = false
@@ -191,7 +238,7 @@ func (s *AppUpdateService) Check() (*models.AppUpdateStatus, error) {
 			s.status.Message = "发现新版本，但 Release 中没有 Windows 安装包"
 		}
 	} else {
-		s.status.Message = "已是最新版本"
+		s.status.Message = "已是最新版本（" + updateSourceLabel(s.status.Source) + " 通道）"
 	}
 	st := s.snapshotLocked()
 	s.mu.Unlock()
@@ -285,7 +332,7 @@ func (s *AppUpdateService) OpenReleasePage() error {
 		return errors.New("暂无 Release 页面")
 	}
 	u, err := url.Parse(raw)
-	if err != nil || u.Scheme != "https" || !isGitHubHost(u.Hostname()) {
+	if err != nil || u.Scheme != "https" || !isTrustedUpdateHost(u.Hostname()) {
 		return errors.New("发布页地址无效")
 	}
 	return openExternalURL(raw)
@@ -303,7 +350,15 @@ func (s *AppUpdateService) OpenDownloadFolder() error {
 	return openLocalPath(dir)
 }
 
+// fetchLatestRelease 按当前更新通道抓取最新 Release。
 func (s *AppUpdateService) fetchLatestRelease() (*githubRelease, error) {
+	if s.source() == UpdateSourceGitee {
+		return s.fetchGiteeRelease()
+	}
+	return s.fetchGitHubRelease()
+}
+
+func (s *AppUpdateService) fetchGitHubRelease() (*githubRelease, error) {
 	repo := s.repo()
 	if !githubRepoRe.MatchString(repo) {
 		return nil, errors.New("GitHub 仓库格式无效，请填写 owner/repo")
@@ -348,9 +403,72 @@ func (s *AppUpdateService) fetchLatestRelease() (*githubRelease, error) {
 	return &release, nil
 }
 
+// fetchGiteeRelease 抓取 Gitee 镜像仓库的最新 Release。
+func (s *AppUpdateService) fetchGiteeRelease() (*githubRelease, error) {
+	repo := s.repo()
+	if !githubRepoRe.MatchString(repo) {
+		return nil, errors.New("Gitee 仓库格式无效，请填写 owner/repo")
+	}
+	base := s.giteeBase
+	if base == "" {
+		base = giteeAPIBase
+	}
+	endpoint := strings.TrimRight(base, "/") + "/repos/" + repo + "/releases/latest"
+	if token := strings.TrimSpace(os.Getenv("GITEE_TOKEN")); token != "" {
+		endpoint += "?access_token=" + url.QueryEscape(token)
+	}
+	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", updateUserAgent)
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("访问 Gitee 失败：%w", err)
+	}
+	defer resp.Body.Close()
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if readErr != nil {
+		return nil, fmt.Errorf("读取 Gitee 响应失败：%w", readErr)
+	}
+	switch resp.StatusCode {
+	case http.StatusOK:
+		// 继续解析
+	case http.StatusNotFound:
+		return nil, fmt.Errorf("未找到 Release：请确认 %s 已在 Gitee 发布 Release 并上传安装包", repo)
+	case http.StatusForbidden, http.StatusTooManyRequests:
+		return nil, errors.New("Gitee 请求受限，请稍后重试")
+	default:
+		return nil, fmt.Errorf("Gitee 返回 HTTP %d：%s", resp.StatusCode, truncateText(string(body), 200))
+	}
+
+	var rel giteeRelease
+	if err := json.Unmarshal(body, &rel); err != nil {
+		return nil, fmt.Errorf("解析 Gitee Release 失败：%w", err)
+	}
+	if strings.TrimSpace(rel.TagName) == "" {
+		return nil, errors.New("最新 Release 没有版本号（tag_name）")
+	}
+	published := time.Time{}
+	if v := strings.TrimSpace(rel.CreatedAt); v != "" {
+		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			published = t
+		}
+	}
+	return &githubRelease{
+		TagName:     rel.TagName,
+		Name:        rel.Name,
+		Body:        rel.Body,
+		HTMLURL:     "https://gitee.com/" + repo + "/releases/tag/" + url.PathEscape(rel.TagName),
+		PublishedAt: published,
+		Assets:      rel.Assets,
+	}, nil
+}
+
 func (s *AppUpdateService) downloadAsset(asset models.AppReleaseAsset) (string, error) {
 	u, err := url.Parse(asset.DownloadURL)
-	if err != nil || u.Scheme != "https" || !isGitHubHost(u.Hostname()) {
+	if err != nil || u.Scheme != "https" || !isTrustedUpdateHost(u.Hostname()) {
 		return "", errors.New("更新包下载地址无效")
 	}
 	client := newUpdateHTTPClient(15 * time.Minute)
@@ -428,16 +546,52 @@ func (s *AppUpdateService) downloadAsset(asset models.AppReleaseAsset) (string, 
 	return path, nil
 }
 
+// source 返回当前更新通道（github / gitee）。
+func (s *AppUpdateService) source() string {
+	if v, err := store.GetMeta(s.db, store.MetaAppUpdateSource); err == nil && strings.TrimSpace(v) != "" {
+		return normalizeUpdateSource(v)
+	}
+	return UpdateSourceGitHub
+}
+
+// repo 返回当前更新通道对应的仓库（owner/repo）。
 func (s *AppUpdateService) repo() string {
-	if v, err := store.GetMeta(s.db, store.MetaAppGitHubRepo); err == nil {
+	key, env, def := repoMetaKey(s.source()), "CRAC_EXAM_GITHUB_REPO", config.DefaultGitHubRepo
+	if s.source() == UpdateSourceGitee {
+		env, def = "CRAC_EXAM_GITEE_REPO", config.DefaultGiteeRepo
+	}
+	if v, err := store.GetMeta(s.db, key); err == nil {
 		if normalized := normalizeGitHubRepo(v); normalized != "" {
 			return normalized
 		}
 	}
-	if v := strings.TrimSpace(os.Getenv("CRAC_EXAM_GITHUB_REPO")); v != "" {
+	if v := strings.TrimSpace(os.Getenv(env)); v != "" {
 		return normalizeGitHubRepo(v)
 	}
-	return config.DefaultGitHubRepo
+	return def
+}
+
+func repoMetaKey(source string) string {
+	if normalizeUpdateSource(source) == UpdateSourceGitee {
+		return store.MetaAppGiteeRepo
+	}
+	return store.MetaAppGitHubRepo
+}
+
+func normalizeUpdateSource(source string) string {
+	switch strings.ToLower(strings.TrimSpace(source)) {
+	case "gitee", "gitee.com", "码云", "cn":
+		return UpdateSourceGitee
+	default:
+		return UpdateSourceGitHub
+	}
+}
+
+func updateSourceLabel(source string) string {
+	if normalizeUpdateSource(source) == UpdateSourceGitee {
+		return "Gitee 镜像"
+	}
+	return "GitHub"
 }
 
 func (s *AppUpdateService) snapshotLocked() models.AppUpdateStatus {
@@ -505,7 +659,7 @@ func newUpdateHTTPClient(timeout time.Duration) *http.Client {
 			if len(via) >= 10 {
 				return errors.New("更新下载重定向次数过多")
 			}
-			if !isGitHubHost(req.URL.Hostname()) {
+			if !isTrustedUpdateHost(req.URL.Hostname()) {
 				return fmt.Errorf("更新下载被重定向到不受信任的地址：%s", req.URL.Hostname())
 			}
 			return nil
@@ -526,11 +680,28 @@ func isGitHubHost(host string) bool {
 	return strings.HasSuffix(host, ".githubusercontent.com")
 }
 
+// isTrustedUpdateHost 同时信任 GitHub 与 Gitee（更新通道二选一）。
+func isTrustedUpdateHost(host string) bool {
+	if isGitHubHost(host) {
+		return true
+	}
+	host = strings.ToLower(strings.TrimSpace(host))
+	for _, allowed := range giteeHostNames {
+		if host == allowed {
+			return true
+		}
+	}
+	return strings.HasSuffix(host, ".gitee.com")
+}
+
 func normalizeGitHubRepo(repo string) string {
 	repo = strings.TrimSpace(repo)
-	repo = strings.TrimPrefix(repo, "https://github.com/")
-	repo = strings.TrimPrefix(repo, "http://github.com/")
-	repo = strings.TrimPrefix(repo, "github.com/")
+	for _, prefix := range []string{
+		"https://github.com/", "http://github.com/", "github.com/",
+		"https://gitee.com/", "http://gitee.com/", "gitee.com/",
+	} {
+		repo = strings.TrimPrefix(repo, prefix)
+	}
 	repo = strings.TrimSuffix(repo, ".git")
 	return strings.Trim(repo, "/")
 }

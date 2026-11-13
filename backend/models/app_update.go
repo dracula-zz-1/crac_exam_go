@@ -21,6 +21,7 @@ type AppUpdateStatus struct {
 	ReleaseURL      string            `json:"releaseUrl"`
 	PublishedAt     string            `json:"publishedAt"`
 	Notes           string            `json:"notes"`
+	Source          string            `json:"source"`
 	Repo            string            `json:"repo"`
 	Asset           *AppReleaseAsset  `json:"asset"`
 	Assets          []AppReleaseAsset `json:"assets"`

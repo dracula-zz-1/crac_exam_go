@@ -16,6 +16,7 @@ import type {
   ImportResult,
 } from "@/types";
 import AppIcon from "@/components/AppIcon.vue";
+import BaseModal from "@/components/BaseModal.vue";
 import ConfirmDialog from "@/components/ConfirmDialog.vue";
 
 const router = useRouter();
@@ -25,6 +26,11 @@ const toast = useToastStore();
 
 const info = ref<AppInfo | null>(null);
 const stats = ref<DBStats | null>(null);
+
+// 数据库目录
+const dataDirOpen = ref(false);
+const dataDirBusy = ref(false);
+const pendingDataDir = ref("");
 
 const dragging = ref(false);
 const pendingPath = ref("");
@@ -52,6 +58,14 @@ const appUpdateError = ref("");
 const appProgress = ref<AppUpdateProgress | null>(null);
 const appInstallOpen = ref(false);
 const appInstalling = ref(false);
+
+// 更新通道：GitHub 官方仓库 / Gitee 镜像仓库
+const appUpdateSource = computed<"github" | "gitee">(() =>
+  appUpdate.value?.source === "gitee" ? "gitee" : "github",
+);
+const appUpdateHost = computed(() =>
+  appUpdateSource.value === "gitee" ? "gitee.com" : "github.com",
+);
 
 let offProgress: (() => void) | null = null;
 let offDrop: (() => void) | null = null;
@@ -82,6 +96,32 @@ async function loadMeta() {
     stats.value = s;
   } catch (e: any) {
     toast.error("读取应用信息失败", e?.message);
+  }
+}
+
+async function pickDataDir() {
+  try {
+    const dir = await api.pickDataDir();
+    if (!dir) return;
+    pendingDataDir.value = dir;
+    dataDirOpen.value = true;
+  } catch (e: any) {
+    toast.error("选择数据目录失败", e?.message);
+  }
+}
+
+async function applyDataDir(migrate: boolean) {
+  if (!pendingDataDir.value) return;
+  dataDirBusy.value = true;
+  try {
+    const message = await api.setDataDir(pendingDataDir.value, migrate);
+    dataDirOpen.value = false;
+    toast.success("数据目录已更新", message);
+    await loadMeta();
+  } catch (e: any) {
+    toast.error("切换数据目录失败", e?.message);
+  } finally {
+    dataDirBusy.value = false;
   }
 }
 
@@ -181,6 +221,20 @@ async function loadAppUpdate() {
     appUpdate.value = await api.getAppUpdateStatus();
   } catch {
     /* ignore */
+  }
+}
+
+async function setUpdateSource(source: "github" | "gitee") {
+  if (appUpdateSource.value === source || appChecking.value || appDownloading.value) return;
+  try {
+    await api.setAppUpdateSource(source);
+    await loadAppUpdate();
+    toast.success(
+      source === "gitee" ? "已切换到 Gitee 镜像通道" : "已切换到 GitHub 通道",
+      appUpdate.value?.repo || "",
+    );
+  } catch (e: any) {
+    toast.error("切换更新通道失败", e?.message);
   }
 }
 
@@ -419,7 +473,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="page settings-page">
+  <div class="page settings-page" data-file-drop-target @drop.prevent="onHtmlDrop">
     <header class="page-head">
       <div>
         <span class="eyebrow">SETTINGS · 设置</span>
@@ -545,11 +599,24 @@ onBeforeUnmount(() => {
           <div class="section-head">
             <div>
               <h2 class="section-title">应用更新</h2>
-              <p class="section-sub">从 GitHub Release 检查并下载桌面安装包</p>
+              <p class="section-sub">选择更新通道，从 GitHub 或 Gitee Release 检查并下载安装包</p>
             </div>
-            <span class="chip" :class="appUpdate?.available ? 'chip-amber' : 'chip-teal'">
-              {{ appUpdate?.available ? "有新版本" : "GitHub Release" }}
-            </span>
+            <div class="segmented update-source-switch">
+              <button
+                :class="{ active: appUpdateSource === 'github' }"
+                :disabled="appChecking || appDownloading"
+                @click="setUpdateSource('github')"
+              >
+                GitHub
+              </button>
+              <button
+                :class="{ active: appUpdateSource === 'gitee' }"
+                :disabled="appChecking || appDownloading"
+                @click="setUpdateSource('gitee')"
+              >
+                Gitee 镜像
+              </button>
+            </div>
           </div>
 
           <div class="update-current">
@@ -562,8 +629,11 @@ onBeforeUnmount(() => {
                 最新版本 {{ appUpdate.latestVersion }}
                 <span v-if="appUpdate.releaseName"> · {{ appUpdate.releaseName }}</span>
               </p>
-              <p v-else>
-                更新源：github.com/{{ appUpdate?.repo || "dracula-zz-1/crac_exam_go" }}
+              <p v-if="!appUpdate?.latestVersion" class="update-source-line">
+                更新通道：{{ appUpdateSource === "gitee" ? "Gitee 镜像" : "GitHub" }}
+              </p>
+              <p class="update-source-line">
+                {{ appUpdateHost }}/{{ appUpdate?.repo || "dracula-zz-1/crac_exam_go" }}
               </p>
               <p v-if="appUpdate?.publishedAt">发布于 {{ fmtDateTime(appUpdate.publishedAt) }}</p>
               <p v-if="appUpdate?.downloadedName" class="mono update-hash">
@@ -654,8 +724,9 @@ onBeforeUnmount(() => {
           </div>
 
           <p class="update-note">
-            更新包从 GitHub Release 获取，仅支持 .exe / .msi。运行安装程序前请确认下载来源可信；
-            更新不会删除本地题库与学习数据。
+            更新包从当前通道（{{ appUpdateSource === "gitee" ? "Gitee 镜像" : "GitHub" }}）
+            的 Release 获取，仅支持 .exe / .msi。国内网络可选 Gitee 镜像通道加快下载；
+            运行安装程序前请确认下载来源可信，更新不会删除本地题库与学习数据。
           </p>
         </section>
 
@@ -681,8 +752,11 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
+          <!-- data-file-drop-target 是 Wails 桌面端文件拖放的必需标记：
+               拖放落在没有该属性的元素上时，原生层会直接忽略这次拖放 -->
           <div
             class="dropzone"
+            data-file-drop-target
             :class="{ dragging, disabled: importing }"
             @dragover.prevent="dragging = true"
             @dragenter.prevent="dragging = true"
@@ -834,14 +908,10 @@ onBeforeUnmount(() => {
           <div class="data-dir">
             <span>数据目录</span>
             <code>{{ info?.dataDir ?? "—" }}</code>
-          </div>
-
-          <div class="tech-chips">
-            <span class="chip">Wails v3</span>
-            <span class="chip">Go</span>
-            <span class="chip">Vue 3</span>
-            <span class="chip">SQLite</span>
-            <span class="chip">纯 Go PDF</span>
+            <button class="btn btn-sm btn-ghost" :disabled="dataDirBusy" @click="pickDataDir">
+              <AppIcon name="folder" :size="13" />
+              更改
+            </button>
           </div>
 
           <p class="copyright">{{ info?.copyright }}</p>
@@ -921,6 +991,39 @@ onBeforeUnmount(() => {
     >
       <template #icon><AppIcon name="trash" :size="20" /></template>
     </ConfirmDialog>
+
+    <!-- 更换数据目录 -->
+    <BaseModal
+      :open="dataDirOpen"
+      title="切换数据目录"
+      subtitle="切换后需要重启应用才会生效"
+      @close="dataDirOpen = false"
+    >
+      <div class="data-dir-info">
+        <div class="data-dir-icon"><AppIcon name="folder" :size="22" /></div>
+        <div>
+          <strong>新的数据目录</strong>
+          <p class="mono">{{ pendingDataDir }}</p>
+          <p>
+            选择「复制现有数据」会把当前的题库、考试记录、错题与收藏一起复制到新目录；
+            选择「仅切换」则新目录从空数据开始。
+          </p>
+        </div>
+      </div>
+      <template #footer>
+        <button class="btn btn-ghost" :disabled="dataDirBusy" @click="dataDirOpen = false">
+          取消
+        </button>
+        <button class="btn btn-soft" :disabled="dataDirBusy" @click="applyDataDir(false)">
+          仅切换（空数据）
+        </button>
+        <button class="btn btn-accent" :disabled="dataDirBusy" @click="applyDataDir(true)">
+          <span v-if="dataDirBusy" class="spinner dark" />
+          <AppIcon v-else name="download" :size="15" />
+          复制现有数据并切换
+        </button>
+      </template>
+    </BaseModal>
   </div>
 </template>
 
@@ -1128,6 +1231,18 @@ onBeforeUnmount(() => {
   gap: 8px;
   flex-wrap: wrap;
   margin-top: 14px;
+}
+
+.update-source-switch {
+  flex: none;
+}
+.update-source-switch button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.update-source-line {
+  font-family: var(--font-mono);
+  letter-spacing: 0.01em;
 }
 
 .import-note {
@@ -1421,6 +1536,35 @@ onBeforeUnmount(() => {
   font-size: 9.5px;
   overflow-wrap: anywhere;
   line-height: 1.5;
+}
+.data-dir .btn {
+  align-self: flex-start;
+  margin-top: 2px;
+}
+.data-dir-info {
+  display: flex;
+  gap: 14px;
+}
+.data-dir-info strong {
+  font-size: 13.5px;
+  font-weight: 700;
+}
+.data-dir-info p {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--ink-3);
+  overflow-wrap: anywhere;
+}
+.data-dir-icon {
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
+  background: var(--amber-soft);
+  color: #9a6514;
+  display: grid;
+  place-items: center;
+  flex: none;
 }
 .tech-chips {
   display: flex;

@@ -39,6 +39,7 @@ const remaining = ref(0);
 const submitted = ref(false);
 const submitting = ref(false);
 const navOpen = ref(false);
+const imageOpen = ref(false);
 const submitOpen = ref(false);
 const exitOpen = ref(false);
 const autoSubmitTriggered = ref(false);
@@ -216,7 +217,8 @@ function confirmExit() {
 }
 
 function onKey(e: KeyboardEvent) {
-  if (!live.value || navOpen.value || submitOpen.value || exitOpen.value) return;
+  if (!live.value || navOpen.value || imageOpen.value || submitOpen.value || exitOpen.value)
+    return;
   const target = e.target as HTMLElement;
   if (["INPUT", "TEXTAREA"].includes(target?.tagName)) return;
   const key = e.key.toUpperCase();
@@ -254,7 +256,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="page exam-page">
+  <div class="page exam-page" :class="{ 'exam-live': !!startData }">
     <!-- 开考确认 -->
     <template v-if="!startData">
       <button class="back-btn" @click="router.push('/home')">
@@ -370,28 +372,33 @@ onBeforeUnmount(() => {
 
       <div class="exam-grid" v-if="question">
         <section class="q-card surface">
-          <div class="q-top">
-            <div class="q-meta">
-              <span class="chip" :class="isMulti ? 'chip-teal' : 'chip-amber'">
-                {{ isMulti ? "多选题" : "单选题" }}
-              </span>
-              <span class="q-index mono">第 {{ index + 1 }} / {{ total }} 题</span>
+          <div class="q-body">
+            <div class="q-top">
+              <div class="q-meta">
+                <span class="chip" :class="isMulti ? 'chip-teal' : 'chip-amber'">
+                  {{ isMulti ? "多选题" : "单选题" }}
+                </span>
+                <span class="q-index mono">第 {{ index + 1 }} / {{ total }} 题</span>
+              </div>
+              <span class="q-code mono">{{ question.J }}</span>
             </div>
-            <span class="q-code mono">{{ question.J }}</span>
+
+            <h2 class="q-stem">{{ question.Q }}</h2>
+
+            <div v-if="question.F" class="q-image" @click="imageOpen = true">
+              <img :src="question.F" alt="题目图片" />
+              <span class="q-image-hint">
+                <AppIcon name="search" :size="13" /> 点击放大
+              </span>
+            </div>
+
+            <OptionList
+              :options="options"
+              :selected="selected"
+              :multi="isMulti"
+              @select="select"
+            />
           </div>
-
-          <h2 class="q-stem">{{ question.Q }}</h2>
-
-          <div v-if="question.F" class="q-image">
-            <img :src="question.F" alt="题目图片" />
-          </div>
-
-          <OptionList
-            :options="options"
-            :selected="selected"
-            :multi="isMulti"
-            @select="select"
-          />
 
           <div class="q-actions">
             <button class="btn btn-ghost" :disabled="index === 0" @click="prev">
@@ -429,7 +436,7 @@ onBeforeUnmount(() => {
             </div>
           </section>
 
-          <section class="surface card-pad side-card">
+          <section class="surface card-pad side-card nav-card">
             <h3 class="side-title">答题卡</h3>
             <div class="mini-grid">
               <button
@@ -458,6 +465,18 @@ onBeforeUnmount(() => {
         </aside>
       </div>
     </template>
+
+    <!-- 题目图片 -->
+    <BaseModal
+      :open="imageOpen"
+      title="查看题目图片"
+      wide
+      @close="imageOpen = false"
+    >
+      <div class="image-full" v-if="question?.F">
+        <img :src="question.F" alt="题目图片" />
+      </div>
+    </BaseModal>
 
     <!-- 答题卡 -->
     <BaseModal
@@ -538,6 +557,29 @@ onBeforeUnmount(() => {
 <style scoped>
 .exam-page {
   max-width: 1240px;
+}
+/* 切页动画不再上下位移，避免瞬间把一屏页面挤出滚动条 */
+.exam-page.exam-live.page-enter-from,
+.exam-page.exam-live.page-leave-to {
+  transform: none;
+}
+/* 考试进行中：整页锁定一屏，答题过程中不出现纵向滚动条 */
+.exam-page.exam-live {
+  height: calc(100vh - 64px);
+  padding-top: 16px;
+  padding-bottom: 18px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.exam-page.exam-live .exam-bar,
+.exam-page.exam-live .time-track {
+  flex: none;
+}
+.exam-page.exam-live .exam-grid {
+  flex: 1;
+  min-height: 0;
+  align-items: stretch;
 }
 .back-btn {
   display: inline-flex;
@@ -784,13 +826,28 @@ onBeforeUnmount(() => {
   align-items: start;
 }
 .q-card {
-  padding: 28px 32px 24px;
+  padding: 20px 26px 16px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+/* 题干 / 图片 / 选项：超长时只在卡片内部滚动 */
+.q-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+/* 考试答题期间压缩选项行高，保证带图的题目也能一屏放下 */
+.q-body :deep(.option) {
+  padding: 12px 15px;
 }
 .q-top {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 18px;
+  margin-bottom: 14px;
 }
 .q-meta {
   display: flex;
@@ -807,39 +864,68 @@ onBeforeUnmount(() => {
   letter-spacing: 0.06em;
 }
 .q-stem {
-  font-size: 21px;
-  line-height: 1.65;
+  font-size: 18px;
+  line-height: 1.55;
   font-weight: 700;
   letter-spacing: -0.01em;
-  margin-bottom: 20px;
+  margin-bottom: 14px;
 }
 .q-image {
-  margin-bottom: 20px;
+  position: relative;
+  margin-bottom: 14px;
   border-radius: 14px;
   overflow: hidden;
   border: 1px solid var(--line);
   background: var(--navy);
+  cursor: zoom-in;
 }
 .q-image img {
   width: 100%;
-  max-height: 320px;
+  max-height: 160px;
   object-fit: contain;
+  margin: 0 auto;
+}
+.q-image-hint {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 9px;
+  border-radius: 99px;
+  font-size: 10px;
+  color: #f4f0e6;
+  background: rgba(16, 24, 32, 0.65);
+  backdrop-filter: blur(6px);
 }
 .q-actions {
+  flex: none;
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-top: 24px;
-  padding-top: 20px;
+  margin-top: 12px;
+  padding-top: 12px;
   border-top: 1px solid var(--line);
 }
 
 .exam-side {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  position: sticky;
-  top: 78px;
+  gap: 12px;
+  min-height: 0;
+  height: 100%;
+}
+.nav-card {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.nav-card .mini-grid {
+  overflow-y: auto;
+  min-height: 0;
+  padding-right: 4px;
 }
 .side-card {
   padding: 20px;
@@ -1002,7 +1088,15 @@ onBeforeUnmount(() => {
   color: #a63b2e;
 }
 
-@media (max-width: 1180px) {
+.image-full img {
+  width: 100%;
+  max-height: 70vh;
+  object-fit: contain;
+  border-radius: 12px;
+}
+
+/* 窗口极窄时（低于应用最小宽度）才退化为可滚动的单列布局 */
+@media (max-width: 1040px) {
   .intro-grid,
   .intro {
     grid-template-columns: 1fr;
@@ -1010,13 +1104,28 @@ onBeforeUnmount(() => {
   .intro-art {
     display: none;
   }
+  .exam-page.exam-live {
+    height: auto;
+    min-height: calc(100vh - 64px);
+    overflow: visible;
+    padding-bottom: 40px;
+  }
   .exam-grid {
     grid-template-columns: 1fr;
   }
+  .q-card {
+    overflow: visible;
+  }
+  .q-body {
+    overflow: visible;
+  }
   .exam-side {
-    position: static;
     display: grid;
     grid-template-columns: 1fr 1fr;
+    height: auto;
+  }
+  .nav-card {
+    min-height: 260px;
   }
   .exam-side > .btn {
     grid-column: span 2;

@@ -221,6 +221,7 @@ export interface AppUpdateStatus {
   releaseUrl: string;
   publishedAt: string;
   notes: string;
+  source: string;
   repo: string;
   asset: AppReleaseAsset | null;
   assets: AppReleaseAsset[];

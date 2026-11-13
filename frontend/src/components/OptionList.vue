@@ -58,7 +58,7 @@ function mark(key: string) {
 .options {
   display: flex;
   flex-direction: column;
-  gap: 11px;
+  gap: 9px;
 }
 .option-mark {
   margin-left: auto;

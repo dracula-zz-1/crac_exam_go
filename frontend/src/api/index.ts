@@ -181,6 +181,9 @@ const realApi = {
   setAppUpdateRepo: (repo: string) =>
     call<void>(() => AppUpdateService.SetRepo(repo)),
 
+  setAppUpdateSource: (source: string) =>
+    call<void>(() => AppUpdateService.SetSource(source)),
+
   checkAppUpdate: () =>
     call<AppUpdateStatus>(() => AppUpdateService.Check()),
 
@@ -215,6 +218,15 @@ const realApi = {
 
   getAppInfo: () =>
     call<AppInfo>(() => SettingsService.GetAppInfo()),
+
+  pickDataDir: () =>
+    call<string>(() => SettingsService.PickDataDir()),
+
+  setDataDir: (dir: string, migrate: boolean) =>
+    call<string>(() => SettingsService.SetDataDir(dir, migrate)),
+
+  resetDataDir: () =>
+    call<string>(() => SettingsService.ResetDataDir()),
 
   onImportProgress(cb: (p: ImportProgress) => void): () => void {
     return Events.On("import:progress", (event: any) => cb(event.data));

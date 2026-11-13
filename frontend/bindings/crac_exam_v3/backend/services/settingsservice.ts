@@ -24,3 +24,25 @@ export function GetAppInfo(): $CancellablePromise<models$0.AppInfo | null> {
 export function GetDBStats(): $CancellablePromise<models$0.DBStats | null> {
     return $Call.ByID(131482153);
 }
+
+/**
+ * PickDataDir 打开系统目录选择框，返回用户选择的数据目录。
+ */
+export function PickDataDir(): $CancellablePromise<string> {
+    return $Call.ByID(3406631788);
+}
+
+/**
+ * ResetDataDir 恢复默认数据目录。
+ */
+export function ResetDataDir(): $CancellablePromise<string> {
+    return $Call.ByID(1522965066);
+}
+
+/**
+ * SetDataDir 设置数据目录。migrate 为真时把当前数据库复制到新目录。
+ * 数据目录在启动时读取，因此需要重启应用才会生效。
+ */
+export function SetDataDir(dir: string, migrate: boolean): $CancellablePromise<string> {
+    return $Call.ByID(534107019, dir, migrate);
+}

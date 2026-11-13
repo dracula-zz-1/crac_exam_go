@@ -408,6 +408,48 @@ function fmtDuration(sec: number) {
             </div>
         </section>
 
+        <!-- 成绩趋势：整行铺开，图表才看得清 -->
+        <section class="surface card-pad trend-section rise rise-1">
+          <div class="section-head">
+            <div>
+              <h2 class="section-title">成绩趋势</h2>
+              <p class="section-sub">最近 {{ days }} 天的考试表现</p>
+            </div>
+            <div class="segmented">
+              <button :class="{ active: days === 7 }" @click="days = 7">7 天</button>
+              <button :class="{ active: days === 30 }" @click="days = 30">30 天</button>
+              <button :class="{ active: days === 180 }" @click="days = 180">半年</button>
+            </div>
+          </div>
+
+          <div class="chart-cats">
+            <button
+              class="chart-cat"
+              :class="{ active: chartCategory === '' }"
+              @click="chartCategory = ''"
+            >
+              全部
+            </button>
+            <button
+              v-for="cat in (['A', 'B', 'C'] as Category[])"
+              :key="cat"
+              class="chart-cat"
+              :class="{ active: chartCategory === cat }"
+              @click="chartCategory = cat"
+            >
+              {{ cat }} 类
+            </button>
+          </div>
+
+          <div :class="{ 'chart-dim': chartLoading }">
+            <ScoreTrend
+              :points="series"
+              :pass-score="chartPassScore"
+              :max-score="chartMaxScore"
+            />
+          </div>
+        </section>
+
         <div class="grid-2 dashboard-lower">
           <div class="stack gap-22">
           <section class="surface card-pad rise rise-2">
@@ -450,47 +492,6 @@ function fmtDuration(sec: number) {
         </div>
 
         <aside class="stack gap-22">
-          <section class="surface card-pad rise rise-1">
-            <div class="section-head">
-              <div>
-                <h2 class="section-title">成绩趋势</h2>
-                <p class="section-sub">最近 {{ days }} 天的考试表现</p>
-              </div>
-              <div class="segmented">
-                <button :class="{ active: days === 7 }" @click="days = 7">7 天</button>
-                <button :class="{ active: days === 30 }" @click="days = 30">30 天</button>
-                <button :class="{ active: days === 180 }" @click="days = 180">半年</button>
-              </div>
-            </div>
-
-            <div class="chart-cats">
-              <button
-                class="chart-cat"
-                :class="{ active: chartCategory === '' }"
-                @click="chartCategory = ''"
-              >
-                全部
-              </button>
-              <button
-                v-for="cat in (['A', 'B', 'C'] as Category[])"
-                :key="cat"
-                class="chart-cat"
-                :class="{ active: chartCategory === cat }"
-                @click="chartCategory = cat"
-              >
-                {{ cat }} 类
-              </button>
-            </div>
-
-            <div :class="{ 'chart-dim': chartLoading }">
-              <ScoreTrend
-                :points="series"
-                :pass-score="chartPassScore"
-                :max-score="chartMaxScore"
-              />
-            </div>
-          </section>
-
           <section class="surface card-pad rise rise-2">
             <div class="section-head">
               <div>
@@ -610,6 +611,12 @@ function fmtDuration(sec: number) {
 }
 .dashboard-lower {
   margin-top: 0;
+}
+.trend-section {
+  margin-bottom: 22px;
+}
+.trend-section .chart-cats {
+  margin-bottom: 14px;
 }
 .empty-bank {
   display: flex;

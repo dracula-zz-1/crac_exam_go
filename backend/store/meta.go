@@ -19,8 +19,10 @@ const (
 	MetaBankAutoCheck    = "bank.auto_check"
 	MetaBankAutoImport   = "bank.auto_import"
 
-	// 应用自身（GitHub Release）在线更新源。
-	MetaAppGitHubRepo = "app.github_repo"
+	// 应用自身（GitHub / Gitee Release）在线更新源。
+	MetaAppGitHubRepo   = "app.github_repo"
+	MetaAppGiteeRepo    = "app.gitee_repo"
+	MetaAppUpdateSource = "app.update_source"
 )
 
 func GetMeta(db *sql.DB, key string) (string, error) {

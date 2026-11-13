@@ -13,9 +13,9 @@ const props = withDefaults(
   { color: "var(--teal)" },
 );
 
-const W = 680;
-const H = 232;
-const pad = { l: 38, r: 18, t: 18, b: 32 };
+const W = 900;
+const H = 280;
+const pad = { l: 46, r: 24, t: 22, b: 38 };
 
 const maxVal = computed(() => {
   const totals = props.points.map((p) => p.total || 0);
@@ -67,8 +67,16 @@ function fmt(iso: string) {
 const xLabels = computed(() => {
   const n = props.points.length;
   if (!n) return [];
-  const idx = n === 1 ? [0] : [0, Math.floor((n - 1) / 2), n - 1];
-  return [...new Set(idx)].map((i) => ({ x: x(i), text: fmt(props.points[i].date) }));
+  if (n === 1) return [{ x: x(0), text: fmt(props.points[0].date) }];
+  const count = Math.min(5, n);
+  const idx = [
+    ...new Set(
+      Array.from({ length: count }, (_, k) =>
+        Math.round((k * (n - 1)) / (count - 1)),
+      ),
+    ),
+  ];
+  return idx.map((i) => ({ x: x(i), text: fmt(props.points[i].date) }));
 });
 </script>
 
@@ -146,7 +154,7 @@ const xLabels = computed(() => {
         <circle
           :cx="x(i)"
           :cy="y(p.score)"
-          r="4.5"
+          r="5.5"
           :fill="p.passed ? color : 'var(--red)'"
           stroke="var(--surface)"
           stroke-width="2.5"
@@ -174,7 +182,7 @@ const xLabels = computed(() => {
 <style scoped>
 .trend {
   width: 100%;
-  min-height: 200px;
+  min-height: 260px;
 }
 .trend-svg {
   width: 100%;
@@ -182,18 +190,18 @@ const xLabels = computed(() => {
   display: block;
 }
 .axis-text {
-  font-size: 10px;
+  font-size: 13px;
   fill: var(--muted);
   font-family: var(--font-sans);
 }
 .pass-text {
-  font-size: 9.5px;
+  font-size: 12.5px;
   fill: #a8751f;
   font-family: var(--font-sans);
   font-weight: 600;
 }
 .trend-empty {
-  min-height: 210px;
+  min-height: 260px;
   display: flex;
   flex-direction: column;
   align-items: center;

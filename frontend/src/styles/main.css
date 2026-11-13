@@ -689,10 +689,10 @@ img {
 .option {
   display: flex;
   align-items: flex-start;
-  gap: 14px;
-  padding: 16px 18px;
+  gap: 12px;
+  padding: 13px 16px;
   border: 1.5px solid var(--line);
-  border-radius: 14px;
+  border-radius: 13px;
   background: var(--surface);
   cursor: pointer;
   transition: border-color 0.15s, background 0.15s, transform 0.15s, box-shadow 0.15s;
@@ -706,12 +706,12 @@ img {
   box-shadow: var(--shadow-xs);
 }
 .option-key {
-  width: 28px;
-  height: 28px;
-  border-radius: 9px;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
   display: grid;
   place-items: center;
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 800;
   background: var(--surface-2);
   color: var(--ink-2);
@@ -720,10 +720,10 @@ img {
   transition: all 0.15s;
 }
 .option-text {
-  font-size: 14.5px;
-  line-height: 1.65;
+  font-size: 13.5px;
+  line-height: 1.6;
   color: var(--ink);
-  padding-top: 3px;
+  padding-top: 2px;
 }
 .option.selected {
   border-color: var(--amber);

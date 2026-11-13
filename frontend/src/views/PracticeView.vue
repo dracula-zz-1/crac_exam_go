@@ -52,7 +52,10 @@ const questions = computed<Question[]>(() => data.value?.questions ?? []);
 const question = computed<Question | null>(() => questions.value[index.value] ?? null);
 const total = computed(() => questions.value.length);
 const isMulti = computed(() => question.value?.type === 2);
-const answerLetters = computed(() => sortedLetters(question.value?.T ?? ""));
+// 乱序后正确答案会换位置，这里跟着重映射到显示字母
+const answerLetters = computed(() =>
+  sortedLetters((question.value?.T ?? "").replace(/[A-D]/gi, (m) => displayLetter(m))),
+);
 const isFavorite = computed(() =>
   question.value ? bank.favoriteIds.has(question.value.id) : false,
 );
@@ -77,16 +80,51 @@ const accuracy = computed(() => {
 });
 
 const modeMeta = computed(() => MODE_META[mode.value]);
+// 只有逐题/随机两种模式共用一个入口，才需要显示切换开关
+const switchable = computed(
+  () => mode.value === "practice" || mode.value === "random",
+);
+const answerTone = computed(() => {
+  if (!revealed.value) return "idle";
+  return isCorrect.value ? "ok" : "bad";
+});
+const answerNote = computed(() => {
+  if (!revealed.value) return "";
+  if (isCorrect.value) {
+    return mode.value === "error" ? "已掌握，可移出错题本" : "";
+  }
+  if (!hasSelection.value) return "未作答不会加入错题本";
+  if (mode.value === "error") return "这道题已收在错题本";
+  return "已自动加入错题本";
+});
+
+// 选项乱序：optionOrder[i] 表示第 i 个显示位（A/B/C/D）对应的原始选项字母
+const OPTION_LABELS = ["A", "B", "C", "D"];
+const optionOrder = ref<string[]>([...OPTION_LABELS]);
+
+function shuffleOptionOrder() {
+  const order = [...OPTION_LABELS];
+  for (let i = order.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [order[i], order[j]] = [order[j], order[i]];
+  }
+  optionOrder.value = order;
+}
+
+// 原始字母 → 乱序后显示的字母
+function displayLetter(original: string) {
+  const idx = optionOrder.value.indexOf(original.toUpperCase());
+  return idx >= 0 ? OPTION_LABELS[idx] : original.toUpperCase();
+}
 
 const options = computed(() => {
   const q = question.value;
   if (!q) return [];
-  return [
-    { key: "A", text: q.A },
-    { key: "B", text: q.B },
-    { key: "C", text: q.C },
-    { key: "D", text: q.D },
-  ];
+  const text: Record<string, string> = { A: q.A, B: q.B, C: q.C, D: q.D };
+  return optionOrder.value.map((original, i) => ({
+    key: OPTION_LABELS[i],
+    text: text[original] ?? "",
+  }));
 });
 
 function sortedLetters(raw: string) {
@@ -129,6 +167,7 @@ async function load(force = false) {
 function resetQuestion() {
   selected.value = [];
   revealed.value = false;
+  shuffleOptionOrder();
 }
 
 function select(key: string) {
@@ -333,26 +372,25 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
         <AppIcon name="arrowLeft" :size="17" />
         返回
       </button>
-      <div class="head-copy">
-        <span class="eyebrow">{{ modeMeta.label }} · {{ category }} 类</span>
-        <h1 class="page-title">{{ modeMeta.label }}</h1>
-        <p class="page-sub">{{ modeMeta.desc }}</p>
-        <div v-if="mode === 'practice' || mode === 'random'" class="mode-switch">
-          <div class="segmented">
-            <button
-              :class="{ active: mode === 'practice' }"
-              @click="switchMode('practice')"
-            >
-              顺序练习
-            </button>
-            <button
-              :class="{ active: mode === 'random' }"
-              @click="switchMode('random')"
-            >
-              随机练习
-            </button>
-          </div>
+      <div class="head-mode">
+        <div v-if="switchable" class="segmented mode-tabs">
+          <button
+            :class="{ active: mode === 'practice' }"
+            @click="switchMode('practice')"
+          >
+            顺序练习
+          </button>
+          <button
+            :class="{ active: mode === 'random' }"
+            @click="switchMode('random')"
+          >
+            随机练习
+          </button>
         </div>
+        <template v-else>
+          <h1 class="mode-title">{{ modeMeta.label }}</h1>
+          <span class="mode-note">{{ category }} 类 · {{ modeMeta.desc }}</span>
+        </template>
       </div>
       <div class="head-actions" v-if="question">
         <button
@@ -436,53 +474,29 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
 
     <div v-else-if="question" class="practice-grid">
       <section class="q-card surface rise">
-        <div class="q-top">
-          <div class="q-meta">
-            <span class="chip" :class="isMulti ? 'chip-teal' : 'chip-amber'">
-              {{ isMulti ? "多选题" : "单选题" }}
-            </span>
-            <span class="chip chip-outline">{{ category }} 类</span>
-            <span class="q-index mono">{{ index + 1 }} / {{ total }}</span>
-          </div>
-          <span class="q-code mono">{{ question.J }}</span>
-        </div>
-
-        <h2 class="q-stem">{{ question.Q }}</h2>
-
-        <div v-if="question.F" class="q-image" @click="imageOpen = true">
-          <img :src="question.F" alt="题目图片" />
-          <span class="q-image-hint"><AppIcon name="search" :size="13" /> 点击放大</span>
-        </div>
-
-        <OptionList
-          :options="options"
-          :selected="selected"
-          :revealed="revealed"
-          :correct="answerLetters"
-          :multi="isMulti"
-          @select="select"
-        />
-
-        <transition name="page">
-          <div v-if="revealed" class="feedback" :class="isCorrect ? 'ok' : 'bad'">
-            <div class="feedback-icon">
-              <AppIcon :name="isCorrect ? 'check' : 'x'" :size="18" :stroke-width="2.4" />
+        <div class="q-body">
+          <div class="q-top">
+            <div class="q-meta">
+              <span class="chip" :class="isMulti ? 'chip-teal' : 'chip-amber'">
+                {{ isMulti ? "多选题" : "单选题" }}
+              </span>
+              <span class="chip chip-outline">{{ category }} 类</span>
+              <span class="q-index mono">{{ index + 1 }} / {{ total }}</span>
             </div>
-            <div class="feedback-body">
-              <strong>
-                {{ isCorrect ? "回答正确" : hasSelection ? "回答错误" : "未作答" }}
-              </strong>
-              <p>
-                正确答案：<b class="mono">{{ answerLetters }}</b>
-                <span v-if="!isCorrect && hasSelection && mode !== 'error'">
-                  · 已自动加入错题本
-                </span>
-                <span v-else-if="!isCorrect && mode === 'error'">· 这道题已收在错题本</span>
-                <span v-else-if="!isCorrect && !hasSelection">· 未作答不会加入错题本</span>
-              </p>
-            </div>
+            <span class="q-code mono">{{ question.J }}</span>
           </div>
-        </transition>
+
+          <h2 class="q-stem">{{ question.Q }}</h2>
+
+          <OptionList
+            :options="options"
+            :selected="selected"
+            :revealed="revealed"
+            :correct="answerLetters"
+            :multi="isMulti"
+            @select="select"
+          />
+        </div>
 
         <div class="q-actions">
           <button class="btn btn-ghost" @click="prev" :disabled="index === 0">
@@ -502,10 +516,19 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
       </section>
 
       <aside class="q-side">
-        <section class="surface card-pad side-card">
+        <!-- 图片区：有配图才显示卡片（点击放大），无配图不占位 -->
+        <section
+          v-if="question.F"
+          class="surface media-card"
+          @click="imageOpen = true"
+        >
+          <img :src="question.F" alt="题目图片" />
+        </section>
+
+        <section class="surface card-pad side-card progress-card">
           <ProgressRing
             :value="progressPercent"
-            :size="128"
+            :size="108"
             :label="mode === 'random' ? '本轮进度' : '本组进度'"
             :sub="`${index + 1} / ${total}`"
             color="var(--amber)"
@@ -526,14 +549,28 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
           </div>
         </section>
 
-        <section class="surface card-pad side-card">
-          <h3 class="side-title">快捷键</h3>
-          <ul class="shortcuts">
-            <li><kbd>A</kbd><kbd>B</kbd><kbd>C</kbd><kbd>D</kbd><span>选择答案</span></li>
-            <li><kbd>Enter</kbd><span>查看答案 / 下一题</span></li>
-            <li><kbd>←</kbd><kbd>→</kbd><span>上一题 / 下一题</span></li>
-            <li><kbd>F</kbd><span>收藏当前题</span></li>
-          </ul>
+        <section class="surface side-card answer-card" :class="answerTone">
+          <h3 class="side-title">答案</h3>
+          <template v-if="revealed">
+            <div class="answer-state">
+              <AppIcon
+                :name="isCorrect ? 'check' : hasSelection ? 'x' : 'info'"
+                :size="15"
+                :stroke-width="2.6"
+              />
+              <strong>
+                {{ isCorrect ? "回答正确" : hasSelection ? "回答错误" : "未作答" }}
+              </strong>
+            </div>
+            <div class="answer-key">
+              <span>正确答案</span>
+              <b class="mono">{{ answerLetters }}</b>
+            </div>
+            <p class="answer-note">{{ answerNote }}</p>
+          </template>
+          <p v-else class="answer-idle">
+            选出答案后，点「查看答案」揭晓正确答案
+          </p>
         </section>
 
         <section class="surface card-pad side-card progress-mini">
@@ -582,14 +619,27 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
 </template>
 
 <style scoped>
+/* 整页锁定为一屏高度，练习过程中不出现纵向滚动条 */
 .practice-page {
   max-width: 1200px;
+  height: calc(100vh - 64px);
+  padding-top: 18px;
+  padding-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+/* 切页动画不再上下位移，避免瞬间把一屏页面挤出滚动条 */
+.practice-page.page-enter-from,
+.practice-page.page-leave-to {
+  transform: none;
 }
 .practice-head {
+  flex: none;
   display: flex;
-  align-items: flex-start;
-  gap: 22px;
-  margin-bottom: 24px;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 14px;
 }
 .back-btn {
   display: inline-flex;
@@ -603,30 +653,41 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
   color: var(--ink-3);
   background: var(--surface);
   border: 1px solid var(--line);
-  margin-top: 4px;
   transition: all 0.15s;
 }
 .back-btn:hover {
   color: var(--ink);
   border-color: var(--line-strong);
 }
-.head-copy {
+.head-mode {
   flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
 }
-.head-copy .page-title {
-  margin-top: 5px;
+.mode-tabs button {
+  height: 32px;
+  padding: 0 16px;
+  font-size: 13px;
+}
+.mode-title {
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+.mode-note {
+  font-size: 12px;
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .head-actions {
+  flex: none;
   display: flex;
   gap: 8px;
-  margin-top: 8px;
-}
-.mode-switch {
-  margin-top: 12px;
-}
-.mode-switch .segmented button {
-  height: 28px;
-  padding: 0 12px;
 }
 
 .practice-loading {
@@ -635,21 +696,34 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
   gap: 16px;
 }
 .practice-grid {
+  flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 268px;
-  gap: 20px;
-  align-items: start;
+  gap: 18px;
+  align-items: stretch;
 }
 
 .q-card {
-  padding: 28px 32px 24px;
+  padding: 20px 26px 16px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+/* 题干与选项区域：内容过长时只在卡片内部滚动，不撑高页面 */
+.q-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 6px;
 }
 .q-top {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 18px;
+  margin-bottom: 14px;
 }
 .q-meta {
   display: flex;
@@ -668,117 +742,79 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
   letter-spacing: 0.06em;
 }
 .q-stem {
-  font-size: 21px;
-  line-height: 1.65;
+  font-size: 18px;
+  line-height: 1.55;
   font-weight: 700;
   letter-spacing: -0.01em;
-  margin-bottom: 20px;
-}
-.q-image {
-  position: relative;
-  margin: 0 0 20px;
-  border-radius: 14px;
-  overflow: hidden;
-  border: 1px solid var(--line);
-  cursor: zoom-in;
-  background: var(--navy);
-}
-.q-image img {
-  width: 100%;
-  max-height: 320px;
-  object-fit: contain;
-}
-.q-image-hint {
-  position: absolute;
-  right: 10px;
-  bottom: 10px;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 5px 9px;
-  border-radius: 99px;
-  font-size: 10px;
-  color: #f4f0e6;
-  background: rgba(16, 24, 32, 0.65);
-  backdrop-filter: blur(6px);
-}
-.feedback {
-  display: flex;
-  gap: 12px;
-  padding: 15px 17px;
-  border-radius: 13px;
-  margin-top: 18px;
-}
-.feedback.ok {
-  background: var(--green-soft);
-  border: 1px solid rgba(77, 155, 106, 0.25);
-}
-.feedback.bad {
-  background: var(--red-soft);
-  border: 1px solid rgba(208, 92, 77, 0.22);
-}
-.feedback-icon {
-  width: 32px;
-  height: 32px;
-  border-radius: 10px;
-  display: grid;
-  place-items: center;
-  color: #fff;
-  flex: none;
-}
-.feedback.ok .feedback-icon { background: var(--green); }
-.feedback.bad .feedback-icon { background: var(--red); }
-.feedback-body strong {
-  font-size: 13.5px;
-  font-weight: 700;
-}
-.feedback.ok .feedback-body strong { color: #2f7148; }
-.feedback.bad .feedback-body strong { color: #a63b2e; }
-.feedback-body p {
-  margin-top: 4px;
-  font-size: 12px;
-  color: var(--ink-2);
-}
-.feedback-body b {
-  color: var(--ink);
-  font-size: 13px;
+  margin-bottom: 14px;
 }
 .q-actions {
+  flex: none;
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-top: 24px;
-  padding-top: 20px;
+  margin-top: 12px;
+  padding-top: 12px;
   border-top: 1px solid var(--line);
+}
+.q-actions .btn {
+  height: 44px;
+}
+.q-actions .btn-lg {
+  height: 46px;
 }
 
 .q-side {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  position: sticky;
-  top: 20px;
+  gap: 12px;
+  min-height: 0;
+  height: 100%;
 }
+
+/* 图片区：高度贴合图片本身，图片按卡片宽高自适应放大 */
+.media-card {
+  flex: 0 1 auto;
+  min-height: 0;
+  padding: 12px;
+  overflow: hidden;
+  background: var(--navy);
+  cursor: zoom-in;
+}
+.media-card img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 100%;
+  object-fit: contain;
+  margin: 0 auto;
+}
+
 .side-card {
+  flex: none;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 8px;
-  padding: 20px;
+  padding: 18px;
+}
+.progress-card {
+  padding-top: 16px;
+  padding-bottom: 16px;
 }
 .side-stats {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   width: 100%;
   gap: 6px;
-  margin-top: 8px;
+  margin-top: 6px;
 }
 .side-stats div {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 3px;
-  padding: 9px 4px;
+  padding: 8px 4px;
   border-radius: 10px;
   background: var(--surface-2);
 }
@@ -794,44 +830,66 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
   align-self: flex-start;
   font-size: 13px;
   font-weight: 750;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
-.shortcuts {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  width: 100%;
+
+/* 答案区：固定高度，揭晓答案前后尺寸不变 */
+.answer-card {
+  height: 150px;
+  padding: 16px 18px;
+  justify-content: flex-start;
+  align-items: stretch;
+  gap: 7px;
+  overflow: hidden;
+  border-left: 3px solid var(--line-strong);
 }
-.shortcuts li {
+.answer-card.ok { border-left-color: var(--green); }
+.answer-card.bad { border-left-color: var(--red); }
+.answer-state {
   display: flex;
   align-items: center;
-  gap: 4px;
-  font-size: 10.5px;
+  gap: 7px;
+  font-size: 13.5px;
+  font-weight: 700;
+}
+.answer-card.ok .answer-state { color: #2f7148; }
+.answer-card.bad .answer-state { color: #a63b2e; }
+.answer-card.idle .answer-state { color: var(--ink-2); }
+.answer-key {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 11px;
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+.answer-key span {
+  font-size: 11px;
   color: var(--ink-3);
 }
-.shortcuts span {
-  margin-left: auto;
+.answer-key b {
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: var(--ink);
 }
-kbd {
-  min-width: 20px;
-  height: 20px;
-  padding: 0 5px;
-  border-radius: 5px;
-  background: var(--surface-2);
-  border: 1px solid var(--line-strong);
-  border-bottom-width: 2px;
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  display: inline-grid;
-  place-items: center;
-  color: var(--ink-2);
+.answer-note {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--ink-3);
 }
+.answer-idle {
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
 .progress-mini {
   align-items: stretch;
   gap: 10px;
+  padding-top: 14px;
+  padding-bottom: 14px;
 }
 .progress-mini .row {
   font-size: 11px;
@@ -895,17 +953,31 @@ kbd {
   margin-bottom: 18px;
 }
 
-@media (max-width: 1180px) {
+/* 窗口极窄时（低于应用最小宽度）才退化为可滚动的单列布局 */
+@media (max-width: 1040px) {
+  .practice-page {
+    height: auto;
+    min-height: calc(100vh - 64px);
+    overflow: visible;
+    padding-bottom: 40px;
+  }
   .practice-grid {
     grid-template-columns: 1fr;
   }
-  .q-side {
-    position: static;
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
+  .q-card {
+    overflow: visible;
   }
-  .progress-mini {
-    display: none;
+  .q-body {
+    overflow: visible;
+  }
+  .q-side {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    height: auto;
+  }
+  .media-card {
+    min-height: 180px;
+    grid-column: span 2;
   }
 }
 </style>

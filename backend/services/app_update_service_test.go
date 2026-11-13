@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"crac_exam_v3/backend/config"
 	"crac_exam_v3/backend/models"
 	"crac_exam_v3/backend/store"
 )
@@ -122,5 +123,117 @@ func TestCheckParsesReleaseAndPicksAsset(t *testing.T) {
 	}
 	if st.LatestVersion != "v3.1.0" || st.Asset == nil || st.Asset.Name != "crac-exam-v3.1.0-windows-amd64.exe" {
 		t.Fatalf("unexpected status: %+v", st)
+	}
+}
+
+func TestNormalizeUpdateSource(t *testing.T) {
+	tests := map[string]string{
+		"gitee":     UpdateSourceGitee,
+		"Gitee":     UpdateSourceGitee,
+		" GITEE ":   UpdateSourceGitee,
+		"github":    UpdateSourceGitHub,
+		"":          UpdateSourceGitHub,
+		"something": UpdateSourceGitHub,
+	}
+	for input, want := range tests {
+		if got := normalizeUpdateSource(input); got != want {
+			t.Errorf("normalizeUpdateSource(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestNormalizeRepoStripsBothHosts(t *testing.T) {
+	tests := map[string]string{
+		"https://gitee.com/dracula_zz/crac_exam_go.git": "dracula_zz/crac_exam_go",
+		"gitee.com/dracula_zz/crac_exam_go":            "dracula_zz/crac_exam_go",
+		"dracula_zz/crac_exam_go":                      "dracula_zz/crac_exam_go",
+	}
+	for input, want := range tests {
+		if got := normalizeGitHubRepo(input); got != want {
+			t.Errorf("normalizeGitHubRepo(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestIsTrustedUpdateHost(t *testing.T) {
+	trusted := []string{"github.com", "api.github.com", "objects.githubusercontent.com", "gitee.com", "www.gitee.com", "raw.gitee.com"}
+	for _, h := range trusted {
+		if !isTrustedUpdateHost(h) {
+			t.Errorf("isTrustedUpdateHost(%q) = false, want true", h)
+		}
+	}
+	for _, h := range []string{"evil.com", "gitee.com.evil.com", "github.com.evil.com", ""} {
+		if isTrustedUpdateHost(h) {
+			t.Errorf("isTrustedUpdateHost(%q) = true, want false", h)
+		}
+	}
+}
+
+func TestSourceSwitchAndGiteeCheck(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "app-update-gitee.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/dracula_zz/crac_exam_go/releases/latest" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"tag_name": "v3.2.0",
+			"name": "v3.2.0 镜像版",
+			"body": "gitee notes",
+			"prerelease": false,
+			"created_at": "2026-11-12T08:00:00+08:00",
+			"assets": [
+				{"name": "crac-exam-v3.2.0-windows-amd64.exe", "browser_download_url": "https://gitee.com/dracula_zz/crac_exam_go/attach_files/1/download/win.exe"}
+			]
+		}`))
+	}))
+	defer server.Close()
+
+	svc := NewAppUpdateService(db)
+	svc.giteeBase = server.URL
+
+	if err := svc.SetSource("gitee"); err != nil {
+		t.Fatal(err)
+	}
+	if got := svc.source(); got != UpdateSourceGitee {
+		t.Fatalf("source() = %q, want gitee", got)
+	}
+	if got := svc.repo(); got != "dracula_zz/crac_exam_go" {
+		t.Fatalf("repo() = %q", got)
+	}
+
+	st, err := svc.Check()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Source != UpdateSourceGitee {
+		t.Fatalf("status source = %q", st.Source)
+	}
+	if !st.Available || st.LatestVersion != "v3.2.0" {
+		t.Fatalf("unexpected status: %+v", st)
+	}
+	if st.Asset == nil || st.Asset.Name != "crac-exam-v3.2.0-windows-amd64.exe" {
+		t.Fatalf("unexpected asset: %+v", st.Asset)
+	}
+	if st.ReleaseURL != "https://gitee.com/dracula_zz/crac_exam_go/releases/tag/v3.2.0" {
+		t.Fatalf("unexpected release url: %q", st.ReleaseURL)
+	}
+
+	// 切回 GitHub 后状态应重置，且仓库回到 GitHub 默认值
+	if err := svc.SetSource("github"); err != nil {
+		t.Fatal(err)
+	}
+	st = svc.GetStatus()
+	if st.Source != UpdateSourceGitHub || st.Available || st.LatestVersion != "" {
+		t.Fatalf("source reset failed: %+v", st)
+	}
+	if st.Repo != config.DefaultGitHubRepo {
+		t.Fatalf("repo after reset = %q", st.Repo)
 	}
 }
