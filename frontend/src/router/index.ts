@@ -10,6 +10,11 @@ const routes: RouteRecordRaw[] = [
     meta: { public: true },
   },
   {
+    path: "/welcome",
+    name: "welcome",
+    component: () => import("@/views/OnboardingView.vue"),
+  },
+  {
     path: "/home",
     name: "dashboard",
     component: () => import("@/views/DashboardView.vue"),
@@ -70,6 +75,14 @@ router.beforeEach((to) => {
     return { path: "/" };
   }
   if (to.path === "/" && session.user) {
+    return { path: "/home" };
+  }
+  // 还没选择操作等级时，先走一次引导页
+  const needLevel = !!session.user && !session.user.level;
+  if (needLevel && to.name !== "welcome") {
+    return { path: "/welcome" };
+  }
+  if (!needLevel && to.name === "welcome") {
     return { path: "/home" };
   }
   return true;

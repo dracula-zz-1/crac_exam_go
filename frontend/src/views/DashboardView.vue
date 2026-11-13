@@ -15,9 +15,12 @@ import type {
 import AppIcon from "@/components/AppIcon.vue";
 import StatTile from "@/components/StatTile.vue";
 import ScoreTrend from "@/components/ScoreTrend.vue";
+import { nextLevelCategory } from "@/lib/license";
 
 const router = useRouter();
 const session = useSessionStore();
+// 默认类别 = 用户下一次要考的等级（无证→A，A→B，B→C，C→C）
+const defaultCategory = computed(() => nextLevelCategory(session.user?.level));
 const bank = useBankStore();
 const toast = useToastStore();
 
@@ -230,9 +233,9 @@ function fmtDuration(sec: number) {
           <AppIcon name="upload" :size="16" />
           导入题库
         </button>
-        <button class="btn btn-accent" @click="goExam('A')">
+        <button class="btn btn-accent" @click="goExam(defaultCategory)">
           <AppIcon name="zap" :size="16" />
-          开始模拟考试
+          开始 {{ defaultCategory }} 类模拟考试
         </button>
       </div>
     </header>

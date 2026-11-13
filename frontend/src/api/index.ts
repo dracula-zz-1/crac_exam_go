@@ -70,6 +70,9 @@ const realApi = {
   login: (username: string, idCard: string) =>
     call<User>(() => UserService.Login(username, idCard)),
 
+  setUserLevel: (userId: number, level: string) =>
+    call<User>(() => UserService.SetLevel(userId, level)),
+
   getDashboard: (userId: number) =>
     call<Dashboard>(() => StatisticsService.GetDashboard(userId)),
 

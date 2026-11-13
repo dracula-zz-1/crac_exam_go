@@ -323,4 +323,10 @@ export interface User {
     "username": string;
     "idCard": string;
     "lastLogin": string;
+
+    /**
+     * Level 当前持有的业余无线电操作等级：none / A / B / C。
+     * 空串表示尚未询问过，前端会引导用户先选择。
+     */
+    "level": string;
 }

@@ -260,6 +260,9 @@ function mockUpdateStatus(): BankUpdateStatus {
 
 let mockDataDir = "C:\\Users\\Demo\\AppData\\Roaming\\CracExamV3";
 
+// 演示模式下的操作等级（选择后本次会话内保留）
+let mockLevel = "";
+
 const appUpdateState: AppUpdateStatus = {
   checked: false,
   checking: false,
@@ -330,6 +333,7 @@ function dashboard(userId: number): Dashboard {
     username: "演示用户",
     idCard: "DEMO",
     lastLogin: new Date().toISOString(),
+    level: "A",
   };
   const categories = CATEGORIES.map(categoryQuestionCount);
   const results = [...state.results].sort(
@@ -386,8 +390,27 @@ export const mockApi = {
       username: username.trim(),
       idCard: idCard.trim(),
       lastLogin: new Date().toISOString(),
+      // 演示模式：本次会话里选过等级就沿用，否则视为新用户走一次引导
+      level: mockLevel,
     };
     return state.user;
+  },
+
+  async setUserLevel(userId: number, level: string): Promise<User> {
+    await wait(60);
+    const next = level.trim().toLowerCase() === "none" ? "none" : level.trim().toUpperCase();
+    mockLevel = next;
+    if (state.user) {
+      state.user.level = next;
+      return state.user;
+    }
+    return {
+      id: userId,
+      username: "演示用户",
+      idCard: "DEMO",
+      lastLogin: new Date().toISOString(),
+      level: next,
+    };
   },
 
   async getDashboard(userId: number): Promise<Dashboard> {

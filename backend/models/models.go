@@ -8,6 +8,9 @@ type User struct {
 	Username  string    `json:"username"`
 	IDCard    string    `json:"idCard"`
 	LastLogin time.Time `json:"lastLogin"`
+	// Level 当前持有的业余无线电操作等级：none / A / B / C。
+	// 空串表示尚未询问过，前端会引导用户先选择。
+	Level string `json:"level"`
 }
 
 // Question 题目（练习/错题/收藏/题库管理使用，包含答案 T）。

@@ -3,6 +3,8 @@ export interface User {
   username: string;
   idCard: string;
   lastLogin: string;
+  /** 当前持有的操作等级：none / A / B / C；空串表示还没询问过 */
+  level: string;
 }
 
 export interface Question {

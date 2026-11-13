@@ -3,6 +3,7 @@ import { computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useSessionStore } from "@/stores/session";
 import { usingMock } from "@/api";
+import { nextLevelCategory } from "@/lib/license";
 import AppIcon from "./AppIcon.vue";
 
 const route = useRoute();
@@ -17,18 +18,26 @@ interface NavItem {
   hint?: string;
 }
 
-const learnNav: NavItem[] = [
+// 侧栏入口默认进入“下一次要考”的等级，具体类别可在页面内切换
+const defaultCategory = computed(() => nextLevelCategory(session.user?.level));
+
+const learnNav = computed<NavItem[]>(() => [
   { label: "总览", icon: "home", to: "/home", match: ["dashboard"] },
   {
     label: "逐题练习",
     icon: "practice",
-    to: "/practice/practice/A",
+    to: `/practice/practice/${defaultCategory.value}`,
     match: ["practice"],
   },
-  { label: "模拟考试", icon: "exam", to: "/exam/A", match: ["exam"] },
+  {
+    label: "模拟考试",
+    icon: "exam",
+    to: `/exam/${defaultCategory.value}`,
+    match: ["exam"],
+  },
   { label: "错题本", icon: "errors", to: "/errors", match: ["errors"] },
   { label: "收藏夹", icon: "star", to: "/favorites", match: ["favorites"] },
-];
+]);
 
 const toolNav: NavItem[] = [
   { label: "题库管理", icon: "bank", to: "/bank", match: ["bank"] },
@@ -36,6 +45,7 @@ const toolNav: NavItem[] = [
 ];
 
 const titleMap: Record<string, string> = {
+  welcome: "欢迎",
   dashboard: "总览",
   practice: "逐题练习",
   exam: "模拟考试",
@@ -61,9 +71,7 @@ const maskedId = computed(() => {
 });
 
 function isActive(item: NavItem) {
-  return item.match.includes(String(route.name ?? "")) ||
-    (item.to === "/practice/practice/A" && route.name === "practice") ||
-    (item.to === "/exam/A" && route.name === "exam");
+  return item.match.includes(String(route.name ?? ""));
 }
 
 function logout() {

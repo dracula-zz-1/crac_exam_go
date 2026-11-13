@@ -19,3 +19,10 @@ export function GetUser(id: number): $CancellablePromise<models$0.User | null> {
 export function Login(username: string, idCard: string): $CancellablePromise<models$0.User | null> {
     return $Call.ByID(3792960339, username, idCard);
 }
+
+/**
+ * SetLevel 保存用户当前的业余无线电操作等级（none/A/B/C）。
+ */
+export function SetLevel(id: number, level: string): $CancellablePromise<models$0.User | null> {
+    return $Call.ByID(3528641612, id, level);
+}

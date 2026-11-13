@@ -327,16 +327,17 @@ onMounted(load);
 }
 .q-thumb {
   margin-top: 12px;
-  max-width: 420px;
-  border-radius: 12px;
+  max-width: 260px;
+  border-radius: 10px;
   overflow: hidden;
   border: 1px solid var(--line);
   cursor: zoom-in;
-  background: var(--navy);
+  background: transparent;
 }
 .q-thumb img {
+  display: block;
   width: 100%;
-  max-height: 220px;
+  max-height: 140px;
   object-fit: contain;
 }
 .q-reveal {

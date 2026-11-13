@@ -48,3 +48,32 @@ func (s *UserService) GetUser(id int64) (*models.User, error) {
 	}
 	return store.GetUser(s.db, id)
 }
+
+// SetLevel 保存用户当前的业余无线电操作等级（none/A/B/C）。
+func (s *UserService) SetLevel(id int64, level string) (*models.User, error) {
+	if id <= 0 {
+		return nil, fmt.Errorf("请先登录")
+	}
+	level = normalizeLicenseLevel(level)
+	if level == "" {
+		return nil, fmt.Errorf("等级只能是 none / A / B / C")
+	}
+	if err := store.SetUserLevel(s.db, id, level); err != nil {
+		utils.Error("UserService", "保存操作等级失败", err, "user_id", id)
+		return nil, fmt.Errorf("保存操作等级失败，请重试")
+	}
+	utils.Info("UserService", "保存操作等级", "user_id", id, "level", level)
+	return store.GetUser(s.db, id)
+}
+
+// normalizeLicenseLevel 归一化等级；返回空串表示非法。
+func normalizeLicenseLevel(level string) string {
+	switch strings.ToUpper(strings.TrimSpace(level)) {
+	case "NONE":
+		return "none"
+	case "A", "B", "C":
+		return strings.ToUpper(strings.TrimSpace(level))
+	default:
+		return ""
+	}
+}

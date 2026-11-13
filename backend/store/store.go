@@ -152,6 +152,12 @@ func migrate(db *sql.DB) error {
 		}
 	}
 
+	// 旧库补列：用户当前操作等级（none/A/B/C）。
+	if _, err := db.Exec(`ALTER TABLE users ADD COLUMN license_level TEXT NOT NULL DEFAULT ''`); err != nil &&
+		!strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+		utils.Warn("store", "添加 license_level 列失败", "error", err.Error())
+	}
+
 	// 旧库补列：错题累计次数（用于随机练习权重）。
 	if _, err := db.Exec(`ALTER TABLE error_questions ADD COLUMN wrong_count INTEGER NOT NULL DEFAULT 1`); err != nil &&
 		!strings.Contains(strings.ToLower(err.Error()), "duplicate column") {

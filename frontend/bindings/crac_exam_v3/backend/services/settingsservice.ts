@@ -27,6 +27,7 @@ export function GetDBStats(): $CancellablePromise<models$0.DBStats | null> {
 
 /**
  * PickDataDir 打开系统目录选择框，返回用户选择的数据目录。
+ * 用户取消时返回空串且不报错。
  */
 export function PickDataDir(): $CancellablePromise<string> {
     return $Call.ByID(3406631788);

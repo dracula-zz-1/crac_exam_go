@@ -18,6 +18,13 @@ import type {
 import AppIcon from "@/components/AppIcon.vue";
 import BaseModal from "@/components/BaseModal.vue";
 import ConfirmDialog from "@/components/ConfirmDialog.vue";
+import {
+  LICENSE_LEVELS,
+  levelLabel,
+  nextLevelCategory,
+  normalizeLevel,
+  type LicenseLevel,
+} from "@/lib/license";
 
 const router = useRouter();
 const session = useSessionStore();
@@ -26,6 +33,25 @@ const toast = useToastStore();
 
 const info = ref<AppInfo | null>(null);
 const stats = ref<DBStats | null>(null);
+
+// 操作等级（练习/考试默认类别）
+const levelSaving = ref(false);
+const currentLevel = computed(() => normalizeLevel(session.user?.level));
+const defaultCat = computed(() => nextLevelCategory(session.user?.level));
+
+async function changeLevel(level: LicenseLevel) {
+  if (!session.user || levelSaving.value || level === currentLevel.value) return;
+  levelSaving.value = true;
+  try {
+    const user = await api.setUserLevel(session.user.id, level);
+    session.login(user);
+    toast.success("操作等级已更新", `默认按 ${nextLevelCategory(level)} 类练习与考试`);
+  } catch (e: any) {
+    toast.error("更新等级失败", e?.message);
+  } finally {
+    levelSaving.value = false;
+  }
+}
 
 // 数据库目录
 const dataDirOpen = ref(false);
@@ -925,6 +951,27 @@ onBeforeUnmount(() => {
           <p class="copyright">{{ info?.copyright }}</p>
         </section>
 
+        <section class="surface card-pad">
+          <h3 class="section-title">我的操作等级</h3>
+          <p class="section-sub">练习与模拟考试默认按你下一级进行</p>
+          <div class="level-pick">
+            <button
+              v-for="lv in LICENSE_LEVELS"
+              :key="lv.value"
+              class="level-opt"
+              :class="{ active: currentLevel === lv.value }"
+              :disabled="levelSaving"
+              @click="changeLevel(lv.value)"
+            >
+              {{ lv.value === "none" ? "无证" : lv.value }}
+            </button>
+          </div>
+          <p class="level-hint">
+            当前：{{ levelLabel(currentLevel) }} · 默认按
+            <b>{{ defaultCat }} 类</b> 练习与考试
+          </p>
+        </section>
+
         <section class="surface card-pad shortcuts-card">
           <h3 class="section-title">快捷键</h3>
           <p class="section-sub">逐题练习与模拟考试都支持键盘操作</p>
@@ -1661,6 +1708,44 @@ onBeforeUnmount(() => {
 .tips-card li :deep(svg) {
   color: var(--teal);
   margin-top: 1px;
+}
+
+.level-pick {
+  display: flex;
+  gap: 8px;
+  margin: 14px 0 10px;
+}
+.level-opt {
+  flex: 1;
+  height: 38px;
+  border-radius: 11px;
+  border: 1.5px solid var(--line-strong);
+  background: var(--surface);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink-3);
+  transition: all 0.15s;
+}
+.level-opt:hover:not(:disabled) {
+  border-color: var(--amber);
+  color: var(--ink);
+}
+.level-opt.active {
+  border-color: var(--amber);
+  background: var(--amber-soft);
+  color: #8a5a10;
+}
+.level-opt:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.level-hint {
+  font-size: 11.5px;
+  color: var(--ink-3);
+  line-height: 1.6;
+}
+.level-hint b {
+  color: var(--ink);
 }
 
 .shortcut-list {
