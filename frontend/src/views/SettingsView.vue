@@ -907,15 +907,17 @@ onBeforeUnmount(() => {
 
           <div class="data-dir">
             <span>数据目录</span>
-            <div class="data-dir-row">
-              <code>{{ info?.dataDir ?? "—" }}</code>
+            <div class="data-dir-box">
+              <code class="data-dir-path" :title="info?.dataDir ?? ''">
+                {{ info?.dataDir ?? "—" }}
+              </code>
               <button
-                class="btn btn-sm btn-ghost"
+                class="data-dir-more"
                 :disabled="dataDirBusy"
+                title="更改数据目录"
                 @click="pickDataDir"
               >
-                <AppIcon name="folder" :size="13" />
-                更改
+                …
               </button>
             </div>
           </div>
@@ -1532,28 +1534,46 @@ onBeforeUnmount(() => {
   font-size: 9.5px;
   color: var(--ink-3);
 }
-.data-dir-row {
-  display: flex;
-  align-items: stretch;
-  gap: 8px;
-}
-.data-dir code {
-  flex: 1;
-  min-width: 0;
+.data-dir-box {
   display: flex;
   align-items: center;
-  padding: 8px 10px;
+  gap: 6px;
+  padding: 7px 7px 7px 10px;
   border-radius: 8px;
   background: var(--navy);
-  color: #d8d2c4;
+}
+.data-dir-path {
+  flex: 1;
+  min-width: 0;
   font-family: var(--font-mono);
   font-size: 9.5px;
-  overflow-wrap: anywhere;
-  line-height: 1.5;
+  color: #d8d2c4;
+  line-height: 1.6;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.data-dir-row .btn {
+.data-dir-more {
   flex: none;
-  height: auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  color: #d8d2c4;
+  background: rgba(255, 255, 255, 0.09);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  transition: background 0.15s, color 0.15s;
+}
+.data-dir-more:hover {
+  background: rgba(232, 163, 61, 0.28);
+  color: #f4c26b;
+}
+.data-dir-more:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .data-dir-info {
   display: flex;
