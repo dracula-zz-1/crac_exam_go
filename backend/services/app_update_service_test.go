@@ -145,8 +145,8 @@ func TestNormalizeUpdateSource(t *testing.T) {
 func TestNormalizeRepoStripsBothHosts(t *testing.T) {
 	tests := map[string]string{
 		"https://gitee.com/dracula_zz/crac_exam_go.git": "dracula_zz/crac_exam_go",
-		"gitee.com/dracula_zz/crac_exam_go":            "dracula_zz/crac_exam_go",
-		"dracula_zz/crac_exam_go":                      "dracula_zz/crac_exam_go",
+		"gitee.com/dracula_zz/crac_exam_go":             "dracula_zz/crac_exam_go",
+		"dracula_zz/crac_exam_go":                       "dracula_zz/crac_exam_go",
 	}
 	for input, want := range tests {
 		if got := normalizeGitHubRepo(input); got != want {

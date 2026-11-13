@@ -65,12 +65,12 @@ type githubRelease struct {
 
 // giteeRelease 是 Gitee OpenAPI 的 Release 结构，字段比 GitHub 少。
 type giteeRelease struct {
-	TagName     string               `json:"tag_name"`
-	Name        string               `json:"name"`
-	Body        string               `json:"body"`
-	Prerelease  bool                 `json:"prerelease"`
-	CreatedAt   string               `json:"created_at"`
-	Assets      []githubReleaseAsset `json:"assets"`
+	TagName    string               `json:"tag_name"`
+	Name       string               `json:"name"`
+	Body       string               `json:"body"`
+	Prerelease bool                 `json:"prerelease"`
+	CreatedAt  string               `json:"created_at"`
+	Assets     []githubReleaseAsset `json:"assets"`
 }
 
 // AppUpdateService 通过 GitHub 或 Gitee Release 检查、下载并启动应用更新。

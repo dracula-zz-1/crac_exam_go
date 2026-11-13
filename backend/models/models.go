@@ -239,3 +239,16 @@ type AppInfo struct {
 	GoVersion   string `json:"goVersion"`
 	DataDir     string `json:"dataDir"`
 }
+
+// CertificateInfo CRAC 官方查询接口返回的操作证书信息（用于生成电子证时预填）。
+type CertificateInfo struct {
+	Found         bool   `json:"found"`
+	Name          string `json:"name"`
+	IdCard        string `json:"idCard"`
+	Category      string `json:"category"`
+	CertificateNo string `json:"certificateNo"`
+	IssueDate     string `json:"issueDate"`
+	Issuer        string `json:"issuer"`
+	Province      string `json:"province"`
+	Message       string `json:"message"`
+}

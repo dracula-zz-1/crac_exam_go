@@ -6,6 +6,7 @@ import type {
   AppInfo,
   AppUpdateProgress,
   AppUpdateStatus,
+  CertificateInfo,
   BankUpdateSettings,
   BankUpdateStatus,
   CategoryCount,
@@ -933,6 +934,30 @@ export const mockApi = {
     mockDataDir = dir;
     await wait(60);
     return `数据目录已设为 ${dir}${migrate ? "（已复制现有数据）" : "（空数据）"}，重启应用后生效`;
+  },
+
+  async saveCertificateImage(fileName: string, _dataURL: string): Promise<string> {
+    await wait(120);
+    return `C:/Users/Demo/Pictures/${fileName}`;
+  },
+
+  async lookupCertificate(name: string, idCard: string): Promise<CertificateInfo> {
+    await wait(500);
+    return {
+      found: true,
+      name,
+      idCard,
+      category: "A",
+      certificateNo: `A11001234${String(idCard).slice(-2).padStart(2, "0")}`,
+      issueDate: "2024-05-01",
+      issuer: "江苏省工业和信息化厅",
+      province: "江苏",
+      message: "演示模式：已从示例数据填入",
+    };
+  },
+
+  async openCertificateQueryPage(): Promise<void> {
+    await wait(40);
   },
 
   async resetDataDir(): Promise<string> {

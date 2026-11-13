@@ -260,3 +260,16 @@ export interface AppInfo {
 
 export type Category = "A" | "B" | "C";
 export type PracticeMode = "practice" | "random" | "error" | "favorite";
+
+/** CRAC 官方查询接口返回的操作证书信息。 */
+export interface CertificateInfo {
+  found: boolean;
+  name: string;
+  idCard: string;
+  category: string;
+  certificateNo: string;
+  issueDate: string;
+  issuer: string;
+  province: string;
+  message: string;
+}
