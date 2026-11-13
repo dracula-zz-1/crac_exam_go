@@ -73,7 +73,27 @@ jobs:
         run: node tools/setversion.mjs "${{ steps.version.outputs.version }}"
 
       - name: Run backend tests
-        run: go test ./backend/...
+        id: tests
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          go test ./backend/... -v 2>&1 | Tee-Object -FilePath test-output.txt
+          exit $LASTEXITCODE
+
+      - name: Dump test log on failure
+        if: steps.tests.outcome == 'failure'
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B ci-test-log
+          git add -f test-output.txt
+          git commit -m "ci: backend test output"
+          git push -f origin ci-test-log
+
+      - name: Fail when tests failed
+        if: steps.tests.outcome == 'failure'
+        run: exit 1
 
       - name: Build Windows executable
         env:
