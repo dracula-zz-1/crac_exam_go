@@ -1,6 +1,7 @@
 package services
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -82,7 +83,6 @@ func TestSetDataDirValidatesTarget(t *testing.T) {
 func TestDataDirPointerRoundTrip(t *testing.T) {
 	base := t.TempDir()
 	t.Setenv("CRAC_EXAM_CONFIG_DIR", t.TempDir()) // 让记录文件落在临时目录，别碰真实配置
-	
 
 	custom := filepath.Join(base, "elsewhere")
 	if err := config.SetDataDir(custom); err != nil {
@@ -101,5 +101,21 @@ func TestDataDirPointerRoundTrip(t *testing.T) {
 	}
 	if got := config.CustomDataDir(); got != "" {
 		t.Fatalf("CustomDataDir() after reset = %q", got)
+	}
+}
+
+func TestDialogCancelled(t *testing.T) {
+	if dialogCancelled(nil) {
+		t.Fatal("nil 不应视为取消")
+	}
+	for _, msg := range []string{"cancelled by user", "Canceled", "user cancelled the dialog"} {
+		if !dialogCancelled(errors.New(msg)) {
+			t.Errorf("dialogCancelled(%q) = false, want true", msg)
+		}
+	}
+	for _, msg := range []string{"permission denied", "打开目录选择框失败", "disk full"} {
+		if dialogCancelled(errors.New(msg)) {
+			t.Errorf("dialogCancelled(%q) = true, want false", msg)
+		}
 	}
 }

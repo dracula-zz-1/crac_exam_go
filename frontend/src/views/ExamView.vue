@@ -876,7 +876,7 @@ onBeforeUnmount(() => {
   border-radius: 14px;
   overflow: hidden;
   border: 1px solid var(--line);
-  background: var(--navy);
+  background: transparent;
   cursor: zoom-in;
 }
 .q-image img {

@@ -43,6 +43,9 @@ func (s *ImportService) PickZipFile() (string, error) {
 		AddFilter("题库压缩包 (*.zip)", "*.zip").
 		PromptForSingleSelection()
 	if err != nil {
+		if dialogCancelled(err) {
+			return "", nil
+		}
 		return "", fmt.Errorf("打开文件选择框失败：%w", err)
 	}
 	return path, nil

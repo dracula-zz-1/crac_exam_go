@@ -81,6 +81,7 @@ func (s *SettingsService) GetAppInfo() *models.AppInfo {
 }
 
 // PickDataDir 打开系统目录选择框，返回用户选择的数据目录。
+// 用户取消时返回空串且不报错。
 func (s *SettingsService) PickDataDir() (string, error) {
 	app := application.Get()
 	if app == nil {
@@ -94,9 +95,21 @@ func (s *SettingsService) PickDataDir() (string, error) {
 		SetDirectory(config.DataDir()).
 		PromptForSingleSelection()
 	if err != nil {
+		if dialogCancelled(err) {
+			return "", nil
+		}
 		return "", fmt.Errorf("打开目录选择框失败：%w", err)
 	}
 	return dir, nil
+}
+
+// dialogCancelled 判断错误是否来自“用户取消对话框”。
+// Wails 内部以 "cancelled by user" 表示取消，取消不是错误。
+func dialogCancelled(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "cancel")
 }
 
 // SetDataDir 设置数据目录。migrate 为真时把当前数据库复制到新目录。

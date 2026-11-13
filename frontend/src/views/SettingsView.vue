@@ -925,6 +925,33 @@ onBeforeUnmount(() => {
           <p class="copyright">{{ info?.copyright }}</p>
         </section>
 
+        <section class="surface card-pad shortcuts-card">
+          <h3 class="section-title">快捷键</h3>
+          <p class="section-sub">逐题练习与模拟考试都支持键盘操作</p>
+          <ul class="shortcut-list">
+            <li>
+              <kbd>A</kbd><kbd>B</kbd><kbd>C</kbd><kbd>D</kbd>
+              <span>选择答案（也可按 1-4）</span>
+            </li>
+            <li>
+              <kbd>Enter</kbd><kbd>Space</kbd>
+              <span>练习：查看答案 / 下一题</span>
+            </li>
+            <li>
+              <kbd>←</kbd><kbd>→</kbd>
+              <span>上一题 / 下一题</span>
+            </li>
+            <li>
+              <kbd>F</kbd>
+              <span>练习：收藏当前题</span>
+            </li>
+            <li>
+              <kbd>Esc</kbd>
+              <span>关闭弹窗</span>
+            </li>
+          </ul>
+        </section>
+
         <section class="surface card-pad tips-card">
           <h3 class="section-title">小提示</h3>
           <ul>
@@ -1634,6 +1661,40 @@ onBeforeUnmount(() => {
 .tips-card li :deep(svg) {
   color: var(--teal);
   margin-top: 1px;
+}
+
+.shortcut-list {
+  list-style: none;
+  margin: 14px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+.shortcut-list li {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+.shortcut-list span {
+  margin-left: auto;
+  text-align: right;
+}
+.shortcut-list kbd {
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  border: 1px solid var(--line-strong);
+  border-bottom-width: 2px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  display: inline-grid;
+  place-items: center;
+  color: var(--ink-2);
 }
 
 @media (max-width: 1180px) {

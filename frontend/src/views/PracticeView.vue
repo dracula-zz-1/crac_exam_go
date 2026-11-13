@@ -781,7 +781,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
   display: grid;
   place-items: center;
   overflow: hidden;
-  background: var(--navy);
+  background: transparent;
   cursor: zoom-in;
 }
 .media-card img {
