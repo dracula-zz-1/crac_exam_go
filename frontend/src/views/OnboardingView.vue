@@ -16,6 +16,10 @@ const picked = ref<"none" | "A" | "B" | "C">("none");
 const saving = ref(false);
 
 const nextCat = computed(() => nextLevelCategory(picked.value));
+// 证书示意图上展示的类别：跟着当前选择变化
+const certCategory = computed(() =>
+  picked.value === "none" ? "A 类" : `${picked.value} 类`,
+);
 
 async function submit() {
   if (!session.user || saving.value) return;
@@ -89,10 +93,14 @@ async function submit() {
       </section>
 
       <aside class="welcome-art">
-        <LicenseCardArt />
+        <LicenseCardArt
+          :name="session.user?.username"
+          :id-card="session.user?.idCard"
+          :category="certCategory"
+        />
         <p class="welcome-note">
-          上图是《业余无线电台操作技术能力验证证书》的示意图（数据为示例），
-          实际证书样式以核发机构签发为准。
+          上图是《业余无线电台操作技术能力验证证书》的样式示意：姓名与证件号取自你的本地档案，
+          编号、发证日期为占位内容，实际证书以核发机构签发为准。
         </p>
       </aside>
     </div>

@@ -1,148 +1,181 @@
 <script setup lang="ts">
-// 业余无线电台操作技术能力验证证书的示意图。
-// 全部用 SVG 绘制，任意尺寸都清晰；数据为示例，不指向真实个人。
-withDefaults(defineProps<{ sample?: boolean }>(), { sample: true });
+// 《业余无线电台操作技术能力验证证书》样式示意。
+// 全部用 SVG 绘制，任意尺寸都清晰；编号/日期为占位，姓名与证件号取自本地档案。
+const props = withDefaults(
+  defineProps<{
+    name?: string;
+    idCard?: string;
+    category?: string;
+  }>(),
+  { name: "示例用户", idCard: "S11010120000101XXXX", category: "A 类" },
+);
+
+function maskId(raw?: string) {
+  const v = (raw ?? "").trim();
+  if (v.length <= 6) return v || "—";
+  return `${v.slice(0, 3)}${"*".repeat(Math.min(6, v.length - 6))}${v.slice(-3)}`;
+}
 </script>
 
 <template>
   <svg
     class="lic"
-    viewBox="0 0 720 456"
+    viewBox="0 0 900 580"
     role="img"
-    aria-label="业余无线电台操作技术能力验证证书示例"
+    aria-label="业余无线电台操作技术能力验证证书样式示意"
   >
     <defs>
-      <linearGradient id="lic-paper" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0%" stop-color="#fffdf7" />
-        <stop offset="55%" stop-color="#fdf7e9" />
-        <stop offset="100%" stop-color="#f7efdd" />
+      <linearGradient id="lic-paper" x1="0" y1="0" x2="0.4" y2="1">
+        <stop offset="0%" stop-color="#f5faff" />
+        <stop offset="45%" stop-color="#eaf3fb" />
+        <stop offset="100%" stop-color="#e2eefa" />
       </linearGradient>
-      <linearGradient id="lic-frame" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0%" stop-color="#c8a04a" />
-        <stop offset="50%" stop-color="#e2c076" />
-        <stop offset="100%" stop-color="#b98f38" />
+      <linearGradient id="lic-photo-bg" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#e6eff8" />
+        <stop offset="100%" stop-color="#cfdfef" />
       </linearGradient>
-      <pattern id="lic-guilloche" width="44" height="44" patternUnits="userSpaceOnUse">
-        <g fill="none" stroke="#d9c9a3" stroke-width="0.7" opacity="0.55">
-          <circle cx="22" cy="22" r="17" />
-          <circle cx="22" cy="22" r="11.5" />
-          <circle cx="22" cy="22" r="6" />
-          <path d="M0 22h44M22 0v44" stroke-dasharray="2 6" />
-        </g>
+      <!-- 底纹：细密斜线 + 菱形网，模仿证书的防伪花纹 -->
+      <pattern
+        id="lic-guilloche"
+        width="14"
+        height="14"
+        patternUnits="userSpaceOnUse"
+        patternTransform="rotate(35)"
+      >
+        <path d="M0 0h14" stroke="#c3d9ec" stroke-width="0.5" opacity="0.75" />
+        <path d="M0 7h14" stroke="#c3d9ec" stroke-width="0.35" opacity="0.45" />
+        <circle cx="7" cy="7" r="2.4" fill="none" stroke="#c3d9ec" stroke-width="0.35" opacity="0.5" />
       </pattern>
-      <clipPath id="lic-photo">
-        <rect x="556" y="168" width="110" height="146" rx="4" />
+      <clipPath id="lic-photo-clip">
+        <rect x="648" y="196" width="156" height="196" rx="6" />
       </clipPath>
     </defs>
 
-    <!-- 纸张与花纹 -->
-    <rect width="720" height="456" rx="14" fill="url(#lic-paper)" />
-    <rect x="6" y="6" width="708" height="444" rx="10" fill="url(#lic-guilloche)" opacity="0.7" />
-    <rect
-      x="14"
-      y="14"
-      width="692"
-      height="428"
-      rx="8"
-      fill="none"
-      stroke="url(#lic-frame)"
-      stroke-width="3"
-    />
-    <rect
-      x="22"
-      y="22"
-      width="676"
-      height="412"
-      rx="6"
-      fill="none"
-      stroke="#c8a04a"
-      stroke-width="0.9"
-      opacity="0.75"
-    />
+    <!-- 纸张 + 防伪底纹 -->
+    <rect width="900" height="580" rx="10" fill="url(#lic-paper)" />
+    <rect x="12" y="12" width="876" height="556" rx="6" fill="url(#lic-guilloche)" opacity="0.55" />
 
-    <!-- 抬头 -->
-    <g transform="translate(52 44)">
-      <circle r="20" cx="20" cy="20" fill="none" stroke="#b98f38" stroke-width="1.6" />
-      <circle r="13" cx="20" cy="20" fill="none" stroke="#b98f38" stroke-width="1" />
-      <path
-        d="M20 8v24M8 20h24M11 11l18 18M29 11 11 29"
-        stroke="#b98f38"
-        stroke-width="0.8"
-        opacity="0.75"
-      />
+    <!-- 边框：外粗内细的双线 -->
+    <rect
+      x="16"
+      y="16"
+      width="868"
+      height="548"
+      rx="5"
+      fill="none"
+      stroke="#2e6cb3"
+      stroke-width="2.4"
+    />
+    <rect
+      x="26"
+      y="26"
+      width="848"
+      height="528"
+      rx="3"
+      fill="none"
+      stroke="#6f9fcd"
+      stroke-width="0.9"
+    />
+    <g stroke="#2e6cb3" stroke-width="1.8" opacity="0.9">
+      <path d="M26 46h34M46 26v34" />
+      <path d="M874 46h-34M854 26v34" />
+      <path d="M26 534h34M46 554v-34" />
+      <path d="M874 534h-34M854 554v-34" />
     </g>
 
-    <text x="360" y="62" text-anchor="middle" class="lic-title">
+    <!-- 徽标 -->
+    <g transform="translate(78 78)" fill="none" stroke="#2e6cb3">
+      <circle r="32" stroke-width="1.6" />
+      <circle r="25" stroke-width="0.8" opacity="0.9" />
+      <circle r="3.4" fill="#2e6cb3" stroke="none" />
+      <g stroke-width="1.3">
+        <path d="M0 -21 5 -6H20L8 3l5 15L0 9l-13 9 5-15L-20 -6H-5z" opacity="0.85" />
+      </g>
+      <g stroke-width="0.7" opacity="0.7">
+        <path d="M-30 16c6-6 12-6 18 0" />
+        <path d="M12 16c6-6 12-6 18 0" />
+      </g>
+    </g>
+
+    <!-- 标题 -->
+    <text x="466" y="90" text-anchor="middle" class="lic-title">
       业余无线电台操作技术能力验证证书
     </text>
-    <text x="360" y="82" text-anchor="middle" class="lic-sub">
+    <rect x="322" y="100" width="288" height="22" rx="4" fill="#dbeaf7" opacity="0.85" />
+    <text x="466" y="116" text-anchor="middle" class="lic-sub">
       Certificate of Amateur Radio Operation
     </text>
-    <path d="M212 94h296" stroke="#c8a04a" stroke-width="1.2" opacity="0.85" />
 
     <!-- 编号 -->
-    <text x="470" y="122" class="lic-key">编　号</text>
-    <text x="536" y="122" class="lic-no">B1100123456</text>
+    <text x="476" y="164" class="lic-key">编　号</text>
+    <text x="556" y="165" class="lic-no">B1100123456</text>
+    <text x="556" y="180" class="lic-en">Certificate No.</text>
 
     <!-- 字段 -->
-    <g class="lic-fields">
-      <text x="56" y="160" class="lic-key">姓　　名</text>
-      <text x="150" y="160" class="lic-val">示例用户</text>
-      <text x="56" y="166" class="lic-en">Name</text>
+    <g>
+      <text x="66" y="228" class="lic-key">姓　　名</text>
+      <text x="66" y="240" class="lic-en">Name</text>
+      <text x="186" y="228" class="lic-val">{{ props.name }}</text>
+      <path d="M186 236h404" class="lic-rule" />
 
-      <text x="56" y="204" class="lic-key">证件号码</text>
-      <text x="150" y="204" class="lic-val mono">S1101012000010XXXX</text>
-      <text x="56" y="210" class="lic-en">ID No.</text>
+      <text x="66" y="286" class="lic-key">证件号码</text>
+      <text x="66" y="298" class="lic-en">ID No.</text>
+      <text x="186" y="286" class="lic-val mono">{{ maskId(props.idCard) }}</text>
+      <path d="M186 294h404" class="lic-rule" />
 
-      <text x="56" y="248" class="lic-key">操作类别</text>
-      <text x="150" y="248" class="lic-val strong">A 类</text>
-      <text x="56" y="254" class="lic-en">Certificate Class</text>
+      <text x="66" y="344" class="lic-key">操作类别</text>
+      <text x="66" y="356" class="lic-en">Certificate Class</text>
+      <text x="186" y="344" class="lic-val strong">{{ props.category }}</text>
+      <path d="M186 352h404" class="lic-rule" />
 
-      <text x="56" y="292" class="lic-key">发证日期</text>
-      <text x="150" y="292" class="lic-val mono">20XX 年 XX 月 XX 日</text>
-      <text x="56" y="298" class="lic-en">Date of Issue</text>
+      <text x="66" y="402" class="lic-key">发证日期</text>
+      <text x="66" y="414" class="lic-en">Date of Issue</text>
+      <text x="186" y="402" class="lic-val mono">20XX 年 XX 月 XX 日</text>
+      <path d="M186 410h404" class="lic-rule" />
 
-      <text x="56" y="336" class="lic-key">核发机构</text>
-      <text x="150" y="336" class="lic-val">XX 省工业和信息化厅</text>
-      <text x="56" y="342" class="lic-en">Authority</text>
+      <text x="66" y="460" class="lic-key">核发机构</text>
+      <text x="66" y="472" class="lic-en">Authority</text>
+      <text x="186" y="460" class="lic-val">XX 省工业和信息化厅</text>
+      <path d="M186 468h404" class="lic-rule" />
     </g>
 
     <!-- 证件照 -->
-    <rect x="556" y="168" width="110" height="146" rx="4" fill="#e8dfc9" />
-    <g clip-path="url(#lic-photo)">
-      <circle cx="611" cy="222" r="26" fill="#cbbfa2" />
-      <path d="M556 320c0-30 25-48 55-48s55 18 55 48z" fill="#cbbfa2" />
+    <rect x="648" y="196" width="156" height="196" rx="6" fill="url(#lic-photo-bg)" />
+    <g clip-path="url(#lic-photo-clip)">
+      <circle cx="726" cy="266" r="34" fill="#a9c2d8" />
+      <path d="M648 392c0-38 33-62 78-62s78 24 78 62z" fill="#a9c2d8" />
     </g>
     <rect
-      x="556"
-      y="168"
-      width="110"
-      height="146"
+      x="648"
+      y="196"
+      width="156"
+      height="196"
+      rx="6"
+      fill="none"
+      stroke="#2e6cb3"
+      stroke-width="1.6"
+    />
+    <rect
+      x="653"
+      y="201"
+      width="146"
+      height="186"
       rx="4"
       fill="none"
-      stroke="#c8a04a"
-      stroke-width="1.2"
+      stroke="#8fb4d6"
+      stroke-width="0.7"
     />
-    <text x="611" y="330" text-anchor="middle" class="lic-en">照片</text>
 
     <!-- 页脚 -->
-    <path d="M56 372h456" stroke="#d9c9a3" stroke-width="0.9" stroke-dasharray="4 5" />
-    <text x="56" y="394" class="lic-en">
-      原操作证号 A000012345　原发证日期 20XX 年 XX 月 XX 日
+    <path d="M66 500h510" stroke="#a8c4dc" stroke-width="0.8" stroke-dasharray="3 5" />
+    <text x="66" y="522" class="lic-foot">
+      原操作证号 A000012345　　原发证日期 20XX 年 XX 月 XX 日
     </text>
-    <text x="56" y="414" class="lic-en">（如无该部分内容，可在相应位置填写“无”）</text>
-    <text x="612" y="414" text-anchor="end" class="lic-en">中华人民共和国工业和信息化部监制</text>
-
-    <!-- 水印 -->
-    <text
-      v-if="sample"
-      x="360"
-      y="262"
-      text-anchor="middle"
-      class="lic-watermark"
-      transform="rotate(-16 360 262)"
-    >
-      示例
+    <text x="66" y="538" class="lic-en">
+      （如无该部分内容，可在相应位置填写“无”）
+    </text>
+    <text x="854" y="540" text-anchor="end" class="lic-issue">
+      中华人民共和国工业和信息化部监制
     </text>
   </svg>
 </template>
@@ -152,62 +185,72 @@ withDefaults(defineProps<{ sample?: boolean }>(), { sample: true });
   width: 100%;
   height: auto;
   display: block;
-  border-radius: 12px;
-  box-shadow: 0 10px 26px rgba(22, 27, 33, 0.12);
+  border-radius: 10px;
+  box-shadow: 0 10px 26px rgba(22, 27, 33, 0.14);
 }
 .lic-title {
   font-family: var(--font-sans);
-  font-size: 27px;
+  font-size: 35px;
   font-weight: 800;
-  letter-spacing: 0.06em;
-  fill: #1d4f74;
+  letter-spacing: 0.045em;
+  fill: #14487f;
 }
 .lic-sub {
   font-family: var(--font-sans);
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 600;
-  letter-spacing: 0.04em;
-  fill: #6b7c8c;
+  letter-spacing: 0.07em;
+  fill: #2f6fb0;
 }
 .lic-key {
   font-family: var(--font-sans);
-  font-size: 14px;
-  font-weight: 700;
-  fill: #24343f;
-}
-.lic-val {
-  font-family: var(--font-sans);
   font-size: 15px;
-  fill: #1d2b34;
-}
-.lic-val.strong {
-  font-size: 17px;
-  font-weight: 800;
-  fill: #1d4f74;
-}
-.lic-val.mono {
-  font-family: var(--font-mono);
-  font-size: 14px;
+  font-weight: 700;
+  fill: #24486b;
   letter-spacing: 0.02em;
 }
 .lic-en {
   font-family: var(--font-sans);
-  font-size: 9px;
-  fill: #8a97a1;
+  font-size: 8.5px;
+  fill: #7f97ab;
+}
+.lic-val {
+  font-family: var(--font-sans);
+  font-size: 16px;
+  font-weight: 600;
+  fill: #10243a;
+}
+.lic-val.strong {
+  font-size: 18px;
+  font-weight: 800;
+  fill: #14487f;
+}
+.lic-val.mono {
+  font-family: var(--font-mono);
+  font-size: 15.5px;
+  letter-spacing: 0.03em;
 }
 .lic-no {
   font-family: var(--font-mono);
-  font-size: 15px;
+  font-size: 20px;
   font-weight: 700;
-  fill: #a3502f;
-  letter-spacing: 0.06em;
+  fill: #14487f;
+  letter-spacing: 0.05em;
 }
-.lic-watermark {
+.lic-rule {
+  stroke: #9dbdd6;
+  stroke-width: 0.9;
+  stroke-dasharray: 2 4;
+}
+.lic-foot {
   font-family: var(--font-sans);
-  font-size: 96px;
-  font-weight: 900;
-  fill: rgba(232, 163, 61, 0.16);
-  letter-spacing: 0.12em;
-  pointer-events: none;
+  font-size: 9.5px;
+  fill: #6d8ba6;
+}
+.lic-issue {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  fill: #2b5c8f;
 }
 </style>
