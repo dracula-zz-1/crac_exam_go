@@ -1,10 +1,10 @@
 # 题库完整性与程序测试报告
 
-**校验日期**：2026-11-12
-**题库文件**：2025-08-09 版题库 ZIP
-**文件大小**：4,832,551 字节
-**SHA-256**：`ea009d13761165582f032d24edb7a27fdd1672c0bc0c48e8f80f72bee479b344`
-**运行环境**：Windows · Go 1.26.1 · Wails 3.1.0 · SQLite (modernc, 纯 Go) · ledongthuc/pdf + pdfcpu
+- **校验日期**：2026-11-12
+- **题库文件**：2025-08-09 版题库 ZIP
+- **文件大小**：4,832,551 字节
+- **SHA-256**：`ea009d13761165582f032d24edb7a27fdd1672c0bc0c48e8f80f72bee479b344`
+- **运行环境**：Windows · Go 1.26.1 · Wails 3.1.0 · SQLite (modernc, 纯 Go) · ledongthuc/pdf + pdfcpu
 
 ---
 

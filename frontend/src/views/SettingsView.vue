@@ -907,11 +907,17 @@ onBeforeUnmount(() => {
 
           <div class="data-dir">
             <span>数据目录</span>
-            <code>{{ info?.dataDir ?? "—" }}</code>
-            <button class="btn btn-sm btn-ghost" :disabled="dataDirBusy" @click="pickDataDir">
-              <AppIcon name="folder" :size="13" />
-              更改
-            </button>
+            <div class="data-dir-row">
+              <code>{{ info?.dataDir ?? "—" }}</code>
+              <button
+                class="btn btn-sm btn-ghost"
+                :disabled="dataDirBusy"
+                @click="pickDataDir"
+              >
+                <AppIcon name="folder" :size="13" />
+                更改
+              </button>
+            </div>
           </div>
 
           <p class="copyright">{{ info?.copyright }}</p>
@@ -1526,8 +1532,16 @@ onBeforeUnmount(() => {
   font-size: 9.5px;
   color: var(--ink-3);
 }
+.data-dir-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
 .data-dir code {
-  display: block;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
   padding: 8px 10px;
   border-radius: 8px;
   background: var(--navy);
@@ -1537,9 +1551,9 @@ onBeforeUnmount(() => {
   overflow-wrap: anywhere;
   line-height: 1.5;
 }
-.data-dir .btn {
-  align-self: flex-start;
-  margin-top: 2px;
+.data-dir-row .btn {
+  flex: none;
+  height: auto;
 }
 .data-dir-info {
   display: flex;

@@ -516,7 +516,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
       </section>
 
       <aside class="q-side">
-        <!-- 图片区：有配图才显示卡片（点击放大），无配图不占位 -->
+        <!-- 图片区：位置固定，有配图才显示卡片（点击放大），无配图留空但占位不变 -->
         <section
           v-if="question.F"
           class="surface media-card"
@@ -524,6 +524,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
         >
           <img :src="question.F" alt="题目图片" />
         </section>
+        <div v-else class="media-placeholder" />
 
         <section class="surface card-pad side-card progress-card">
           <ProgressRing
@@ -772,11 +773,13 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
   height: 100%;
 }
 
-/* 图片区：高度贴合图片本身，图片按卡片宽高自适应放大 */
+/* 图片区：固定占住右栏顶部这块位置，无配图时用占位块代替，下方卡片位置不变 */
 .media-card {
-  flex: 0 1 auto;
+  flex: 1;
   min-height: 0;
   padding: 12px;
+  display: grid;
+  place-items: center;
   overflow: hidden;
   background: var(--navy);
   cursor: zoom-in;
@@ -784,10 +787,12 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
 .media-card img {
   display: block;
   width: 100%;
-  height: auto;
-  max-height: 100%;
+  height: 100%;
   object-fit: contain;
-  margin: 0 auto;
+}
+.media-placeholder {
+  flex: 1;
+  min-height: 0;
 }
 
 .side-card {
@@ -975,7 +980,8 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
     grid-template-columns: repeat(2, 1fr);
     height: auto;
   }
-  .media-card {
+  .media-card,
+  .media-placeholder {
     min-height: 180px;
     grid-column: span 2;
   }
