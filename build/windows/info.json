@@ -1,12 +1,12 @@
 {
 	"fixed": {
-		"file_version": "3.0.0",
-		"product_version": "3.0.0"
+		"file_version": "3.1.0",
+		"product_version": "3.1.0"
 	},
 	"info": {
 		"0409": {
-			"FileVersion": "3.0.0",
-			"ProductVersion": "3.0.0",
+			"FileVersion": "3.1.0",
+			"ProductVersion": "3.1.0",
 			"CompanyName": "BA4RHH",
 			"FileDescription": "CRAC 业余无线电台操作技术能力验证模拟考试系统",
 			"LegalCopyright": "Copyright © 2024-2026 BA4RHH",

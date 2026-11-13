@@ -14,7 +14,7 @@
     !define INFO_PRODUCTNAME "业余无线电模拟考试"
 !endif
 !ifndef INFO_PRODUCTVERSION
-    !define INFO_PRODUCTVERSION "3.0.0"
+    !define INFO_PRODUCTVERSION "3.1.0"
 !endif
 !ifndef INFO_COPYRIGHT
     !define INFO_COPYRIGHT "Copyright © 2024-2026 BA4RHH"

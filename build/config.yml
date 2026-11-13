@@ -11,7 +11,7 @@ info:
   description: "CRAC 业余无线电台操作技术能力验证模拟考试系统" # The application description
   copyright: "Copyright © 2024-2026 BA4RHH" # Copyright text
   comments: "本地离线运行的业余无线电模拟考试系统" # Comments
-  version: "3.0.0" # The application version
+  version: "3.1.0" # The application version
   # cfBundleIconName: "appicon" # The macOS icon name in Assets.car icon bundles (optional)
   #                               # Should match the name of your .icon file without the extension
   #                               # If not set and Assets.car exists, defaults to "appicon"
