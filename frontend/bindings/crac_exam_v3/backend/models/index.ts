@@ -10,7 +10,6 @@ export type {
     BankUpdateStatus,
     CategoryCount,
     CategoryProgress,
-    CertificateInfo,
     DBStats,
     Dashboard,
     ExamDetail,

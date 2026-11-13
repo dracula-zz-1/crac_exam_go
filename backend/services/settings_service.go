@@ -1,9 +1,7 @@
 package services
 
 import (
-	"bytes"
 	"database/sql"
-	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,10 +15,6 @@ import (
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
-
-const maxCertificateImageBytes = 32 << 20 // 32 MiB，够 2 倍尺寸的证书 PNG
-
-var pngMagic = []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a}
 
 type SettingsService struct {
 	db *sql.DB
@@ -107,70 +101,6 @@ func (s *SettingsService) PickDataDir() (string, error) {
 		return "", fmt.Errorf("打开目录选择框失败：%w", err)
 	}
 	return dir, nil
-}
-
-// SaveCertificateImage 弹出保存对话框，把前端渲染好的电子操作证 PNG 写入用户选择的位置。
-// dataURL 可以是 "data:image/png;base64,…" 或纯 base64；用户取消时返回空串且不报错。
-func (s *SettingsService) SaveCertificateImage(fileName, dataURL string) (string, error) {
-	app := application.Get()
-	if app == nil {
-		return "", fmt.Errorf("应用尚未就绪")
-	}
-
-	raw := strings.TrimSpace(dataURL)
-	if strings.HasPrefix(raw, "data:") {
-		if i := strings.Index(raw, ","); i >= 0 {
-			raw = raw[i+1:]
-		}
-	}
-	data, err := base64.StdEncoding.DecodeString(raw)
-	if err != nil {
-		return "", fmt.Errorf("图片数据无效：%w", err)
-	}
-	if len(data) == 0 {
-		return "", fmt.Errorf("图片数据为空")
-	}
-	if len(data) > maxCertificateImageBytes {
-		return "", fmt.Errorf("图片数据过大，已取消保存")
-	}
-	if !bytes.HasPrefix(data, pngMagic) {
-		return "", fmt.Errorf("只支持 PNG 图片")
-	}
-
-	saveDialog := app.Dialog.SaveFile()
-	saveDialog.SetOptions(&application.SaveFileDialogOptions{
-		Title:    "导出电子操作证",
-		Filename: certificateFileName(fileName),
-	})
-	target, err := saveDialog.
-		AddFilter("PNG 图片 (*.png)", "*.png").
-		PromptForSingleSelection()
-	if err != nil {
-		if dialogCancelled(err) {
-			return "", nil
-		}
-		return "", fmt.Errorf("打开保存对话框失败：%w", err)
-	}
-	target = strings.TrimSpace(target)
-	if target == "" {
-		return "", nil // 用户取消
-	}
-	if !strings.HasSuffix(strings.ToLower(target), ".png") {
-		target += ".png"
-	}
-	if err := os.WriteFile(target, data, 0o644); err != nil {
-		return "", fmt.Errorf("保存图片失败：%w", err)
-	}
-	utils.Info("SettingsService", "导出电子操作证", "path", target, "bytes", len(data))
-	return target, nil
-}
-
-func certificateFileName(name string) string {
-	name = safeUpdateName(name)
-	if !strings.HasSuffix(strings.ToLower(name), ".png") {
-		name += ".png"
-	}
-	return name
 }
 
 // dialogCancelled 判断错误是否来自“用户取消对话框”。

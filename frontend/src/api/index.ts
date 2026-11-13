@@ -8,11 +8,9 @@ import * as SettingsService from "@bindings/crac_exam_v3/backend/services/settin
 import * as ImportService from "@bindings/crac_exam_v3/backend/services/importservice";
 import * as UpdateService from "@bindings/crac_exam_v3/backend/services/updateservice";
 import * as AppUpdateService from "@bindings/crac_exam_v3/backend/services/appupdateservice";
-import * as CertificateService from "@bindings/crac_exam_v3/backend/services/certificateservice";
 import { mockApi } from "./mock";
 import type {
   AppInfo,
-  CertificateInfo,
   AppUpdateProgress,
   AppUpdateStatus,
   BankUpdateSettings,
@@ -232,15 +230,6 @@ const realApi = {
 
   resetDataDir: () =>
     call<string>(() => SettingsService.ResetDataDir()),
-
-  saveCertificateImage: (fileName: string, dataURL: string) =>
-    call<string>(() => SettingsService.SaveCertificateImage(fileName, dataURL)),
-
-  lookupCertificate: (name: string, idCard: string) =>
-    call<CertificateInfo>(() => CertificateService.Lookup(name, idCard)),
-
-  openCertificateQueryPage: () =>
-    call<void>(() => CertificateService.OpenQueryPage()),
 
   onImportProgress(cb: (p: ImportProgress) => void): () => void {
     return Events.On("import:progress", (event: any) => cb(event.data));

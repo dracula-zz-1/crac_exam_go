@@ -112,21 +112,6 @@ export interface CategoryProgress {
 }
 
 /**
- * CertificateInfo CRAC 官方查询接口返回的操作证书信息（用于生成电子证时预填）。
- */
-export interface CertificateInfo {
-    "found": boolean;
-    "name": string;
-    "idCard": string;
-    "category": string;
-    "certificateNo": string;
-    "issueDate": string;
-    "issuer": string;
-    "province": string;
-    "message": string;
-}
-
-/**
  * DBStats 数据库统计。
  */
 export interface DBStats {

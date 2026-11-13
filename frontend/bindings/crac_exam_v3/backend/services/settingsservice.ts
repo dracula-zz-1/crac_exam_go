@@ -41,14 +41,6 @@ export function ResetDataDir(): $CancellablePromise<string> {
 }
 
 /**
- * SaveCertificateImage 弹出保存对话框，把前端渲染好的电子操作证 PNG 写入用户选择的位置。
- * dataURL 可以是 "data:image/png;base64,…" 或纯 base64；用户取消时返回空串且不报错。
- */
-export function SaveCertificateImage(fileName: string, dataURL: string): $CancellablePromise<string> {
-    return $Call.ByID(1577652745, fileName, dataURL);
-}
-
-/**
  * SetDataDir 设置数据目录。migrate 为真时把当前数据库复制到新目录。
  * 数据目录在启动时读取，因此需要重启应用才会生效。
  */

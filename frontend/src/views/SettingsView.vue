@@ -17,7 +17,6 @@ import type {
 } from "@/types";
 import AppIcon from "@/components/AppIcon.vue";
 import BaseModal from "@/components/BaseModal.vue";
-import CertificateExportModal from "@/components/CertificateExportModal.vue";
 import ConfirmDialog from "@/components/ConfirmDialog.vue";
 import {
   LICENSE_LEVELS,
@@ -53,9 +52,6 @@ async function changeLevel(level: LicenseLevel) {
     levelSaving.value = false;
   }
 }
-
-// 电子操作证导出
-const certOpen = ref(false);
 
 // 数据库目录
 const dataDirOpen = ref(false);
@@ -976,20 +972,6 @@ onBeforeUnmount(() => {
           </p>
         </section>
 
-        <section class="surface card-pad cert-card">
-          <h3 class="section-title">电子操作证</h3>
-          <p class="section-sub">在样证底图上填入你的证书信息，导出为 PNG 图片</p>
-          <ul class="cert-points">
-            <li><AppIcon name="check" :size="14" /> 姓名、证件号按本地档案预填</li>
-            <li><AppIcon name="check" :size="14" /> 可用姓名 + 证件号从 CRAC 官方库取回证书编号等信息</li>
-            <li><AppIcon name="check" :size="14" /> 导出的图片仅供学习留档，以官方证书为准</li>
-          </ul>
-          <button class="btn btn-accent btn-block" @click="certOpen = true">
-            <AppIcon name="file" :size="15" />
-            生成电子操作证
-          </button>
-        </section>
-
         <section class="surface card-pad shortcuts-card">
           <h3 class="section-title">快捷键</h3>
           <p class="section-sub">逐题练习与模拟考试都支持键盘操作</p>
@@ -1091,9 +1073,6 @@ onBeforeUnmount(() => {
     >
       <template #icon><AppIcon name="trash" :size="20" /></template>
     </ConfirmDialog>
-
-    <!-- 生成电子操作证 -->
-    <CertificateExportModal :open="certOpen" @close="certOpen = false" />
 
     <!-- 更换数据目录 -->
     <BaseModal
@@ -1727,27 +1706,6 @@ onBeforeUnmount(() => {
   line-height: 1.55;
 }
 .tips-card li :deep(svg) {
-  color: var(--teal);
-  margin-top: 1px;
-}
-
-.cert-points {
-  list-style: none;
-  margin: 12px 0 14px;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.cert-points li {
-  display: flex;
-  gap: 8px;
-  align-items: flex-start;
-  font-size: 11px;
-  color: var(--ink-3);
-  line-height: 1.55;
-}
-.cert-points li :deep(svg) {
   color: var(--teal);
   margin-top: 1px;
 }

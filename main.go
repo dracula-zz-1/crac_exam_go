@@ -50,7 +50,6 @@ func main() {
 			application.NewService(services.NewImportService(db)),
 			application.NewService(services.NewUpdateService(db)),
 			application.NewService(services.NewAppUpdateService(db)),
-			application.NewService(services.NewCertificateService()),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),
