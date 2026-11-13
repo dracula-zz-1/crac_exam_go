@@ -1,9 +1,7 @@
 # 业余无线电模拟考试 · HAM LAB v3
 
-面向 CRAC 业余无线电操作技术能力验证的本地模拟考试系统。相比旧版（`D:\crac_new\crac_exam_go`），本版本整体升级到 **Wails 3.1**，修复了旧版审查中发现的主要问题，重做了前端视觉与交互，并把题库导入改为 **仅支持 ZIP + 纯 Go 解析 PDF**。
+面向 CRAC 业余无线电操作技术能力验证的本地模拟考试系统。当前版本基于 **Wails 3.1**，重做了前端视觉与交互，题库导入改为 **仅支持 ZIP + 纯 Go 解析 PDF**。
 
-> 本项目位于独立目录 `D:\crac_new\crac_exam_v3`，不会修改或依赖旧目录。
->
 > 真实题库（2025-08-09 版 ZIP）的逐字段校验结果见 [BANK_VERIFICATION.md](BANK_VERIFICATION.md)。
 
 ---
@@ -59,7 +57,7 @@
   - 考试倒计时、答题卡、未答提醒、时间到自动交卷、离开确认
   - 题库管理支持搜索、分类筛选（OR 语义）、分页、编辑、图片上传、删除
   - 导入进度实时显示、结果统计、警告列表
-  - 设置页支持从 GitHub Release 检查、下载并启动应用更新
+  - 设置页支持检查、下载并运行应用更新
 - 浏览器预览模式：直接用 `npm run dev` 打开时使用内置演示数据，方便调 UI；桌面端自动使用真实 Go 后端
 
 ---
@@ -85,12 +83,13 @@
 ### 环境
 - Go 1.26+
 - Node.js 18+
-- Wails3 CLI（本机已安装 `wails3 v3.1.0`）
+- Wails3 CLI `v3.1.0`
 - Windows 10/11 + WebView2
 
 ### 开发模式
+在仓库根目录执行：
+
 ```bash
-cd D:\crac_new\crac_exam_v3
 wails3 dev
 ```
 
@@ -117,61 +116,21 @@ npm --prefix frontend run build   # vue-tsc + vite build
 
 ## 📁 数据位置
 
-默认：
+默认位于用户应用数据目录下的 `CracExamV3`：
 
 ```
-%APPDATA%\CracExamV3\
+CracExamV3/
 ├── crac_exam.db
 ├── crac_exam.db-wal
 ├── crac_exam.db-shm
-├── logs\app.log
-├── temp\            # 导入时的临时解压目录，自动清理
-└── updates\         # 从 GitHub Release 下载的应用更新包
+├── logs/app.log
+├── temp/            # 导入时的临时解压目录，自动清理
+└── updates/         # 应用更新包
 ```
 
-可用环境变量覆盖（便携部署/测试）：
+可通过环境变量 `CRAC_EXAM_DATA_DIR` 指定其他数据目录（适用于便携部署或测试）。
 
-```bash
-set CRAC_EXAM_DATA_DIR=D:\CracExamData
-```
-
-> 本版使用新的数据库结构，不会自动迁移旧版 `~/.crac_exam` 或旧目录中的数据。如需保留旧成绩，请先在旧版导出或重新导入题库。
-
----
-
-## 🔄 应用在线更新
-
-设置页「应用更新」会读取 GitHub 仓库 `dracula-zz-1/crac_exam_go` 的最新 Release：
-
-1. 点击「检查更新」，与当前 `config.AppVersion` 比较版本号（支持 `v3.1.0` 形式）。
-2. 若 Release 中有 Windows 安装包，点击「下载更新」保存到 `updates\`。
-3. 下载完成后点击「运行安装」，应用启动安装程序；不会自动运行，也不会删除本地题库与学习数据。
-
-Release 需满足：
-
-- 已发布（不是草稿），标签版本高于当前版本；
-- 附件包含 `.exe` 或 `.msi`，文件名建议带 `windows` 与 `amd64`，例如 `crac-exam-v3.1.0-windows-amd64.exe`；
-- 若 GitHub API 返回附件的 `digest` 字段，应用下载后会进行 SHA-256 校验。
-
-更新源可通过设置接口 `SetRepo`、`app.github_repo` 元数据或 `CRAC_EXAM_GITHUB_REPO` 环境变量覆盖。GitHub API 有速率限制时，可设置 `GITHUB_TOKEN` 环境变量提高额度。
-
-### 发布新版本
-
-仓库包含 [.github/workflows/release.yml](.github/workflows/release.yml)：推送 `v*` 标签时，会在 `windows-latest` 上构建并自动发布 GitHub Release：
-
-```bash
-git tag v3.1.0
-git push origin v3.1.0
-```
-
-工作流会：
-
-- 将标签版本注入应用版本（`backend/config/config.go` 的 `AppVersion`）和 Windows 文件属性；
-- 构建便携版 `crac-exam-v3.1.0-windows-amd64.exe`；
-- 若 NSIS 可用，同时生成安装器 `crac-exam-v3.1.0-windows-amd64-installer.exe`（应用内更新优先选择安装器）；
-- 生成 SHA-256 文件并附加到 Release。
-
-也可以在 GitHub Actions 页面手动触发 `Release Windows` 并填写已存在的标签。
+> 本版使用新的数据库结构，不会自动迁移旧版数据。如需保留旧成绩，请先在旧版导出或重新导入题库。
 
 ---
 
@@ -190,7 +149,7 @@ git push origin v3.1.0
 
 ### 真实题库验证（2025-08-09 版 ZIP）
 
-已用 `D:\crac_new\crac_exam_old\resources\data\20250809124154_2851.zip` 实测：
+已用 2025-08-09 版题库 ZIP 实测：
 
 - 1375 题：单选 1123、多选 252
 - A / B / C 分类：683 / 1143 / 1282（同题可属于多类）
@@ -203,14 +162,14 @@ git push origin v3.1.0
 回归命令：
 
 ```bash
-set CRAC_TEST_ZIP=D:\crac_new\crac_exam_old\resources\data\20250809124154_2851.zip
+set CRAC_TEST_ZIP=path/to/题库.zip
 go test ./backend/importer -run TestRealBankZipIfProvided -v
 ```
 
 也可以不启动 GUI，直接验证导入与 statistics/考试流程：
 
 ```bash
-go run ./tools/verifyimport D:\path\to\题库.zip
+go run ./tools/verifyimport path/to/题库.zip
 ```
 
 ### 题目唯一键：J + P + I
@@ -319,6 +278,8 @@ crac_exam_v3/
 
 - [Wails](https://v3.wails.io/) — Go 桌面应用框架
 - [ledongthuc/pdf](https://github.com/ledongthuc/pdf)、[pdfcpu](https://github.com/pdfcpu/pdfcpu) — 纯 Go PDF 解析
-- CRAC 业余无线电题库的整理者与旧版作者 BA4RHH
+- CRAC 业余无线电题库的整理者
 
-Copyright © 2024-2026 BA4RHH
+## 许可证
+
+本项目采用 [MIT License](LICENSE)。

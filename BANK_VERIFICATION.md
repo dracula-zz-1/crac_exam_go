@@ -1,10 +1,10 @@
 # 题库完整性与程序测试报告
 
 **校验日期**：2026-11-12
-**题库文件**：`D:\crac_new\crac_exam_old\resources\data\20250809124154_2851.zip`
+**题库文件**：2025-08-09 版题库 ZIP
 **文件大小**：4,832,551 字节
 **SHA-256**：`ea009d13761165582f032d24edb7a27fdd1672c0bc0c48e8f80f72bee479b344`
-**运行环境**：Windows 10 21H2 · Go 1.26.1 · Wails 3.1.0 · SQLite (modernc, 纯 Go) · ledongthuc/pdf + pdfcpu
+**运行环境**：Windows · Go 1.26.1 · Wails 3.1.0 · SQLite (modernc, 纯 Go) · ledongthuc/pdf + pdfcpu
 
 ---
 
@@ -161,24 +161,24 @@
 | `wails3 build` | PASS |
 | 桌面启动（WebView2） | PASS |
 | 默认数据库 | 1375 题、53 图、J/P/I 唯一索引存在 |
-| 启动日志 | 正常写入 `%APPDATA%\CracExamV3\logs\app.log` |
+| 启动日志 | 正常写入应用数据目录的 `logs/app.log` |
 
 ---
 
 ## 七、复现命令
 
-```bash
-cd D:\crac_new\crac_exam_v3
+在仓库根目录执行：
 
+```bash
 # 1. 题库完整性校验（数量/唯一键/分类/图片/源字段位置）
-go run ./tools/verifybank "D:\crac_new\crac_exam_old\resources\data\20250809124154_2851.zip"
+go run ./tools/verifybank "path/to/题库.zip"
 
 # 2. 全量后端测试 + 真实题库回归
-set CRAC_TEST_ZIP=D:\crac_new\crac_exam_old\resources\data\20250809124154_2851.zip
+set CRAC_TEST_ZIP=path/to/题库.zip
 go test ./backend/... -count=1
 
 # 3. 真实题库跑首页/练习/三类考试
-go run ./tools/verifyimport "D:\crac_new\crac_exam_old\resources\data\20250809124154_2851.zip"
+go run ./tools/verifyimport "path/to/题库.zip"
 
 # 4. 构建
 wails3 build
@@ -191,4 +191,4 @@ wails3 build
 - 页码剔除规则为“每页首个纯数字行且等于页序”；本 ZIP 已验证通过。若官方题库更换版式（页码在页脚、无页码、罗马数字页码），需重新跑 `verifybank`，必要时调整 `stripPageNumber`。
 - 纯 Go PDF 文本提取依赖字体 `ToUnicode`；当前 ZIP 中的中文提取正确。若未来题库使用特殊字体，`verifybank` 的“字段位置不一致”会直接报错。
 - 题库源数据中的重复选项、重复 J 均按原样保留，不做自动改写。
-- 新版使用独立数据库结构，不自动迁移旧版 `~/.crac_exam` 数据；默认数据库已导入本 ZIP，可直接运行。
+- 新版使用独立数据库结构，不自动迁移旧版数据；默认数据库已导入本 ZIP，可直接运行。
