@@ -1,655 +1,911 @@
+<script setup lang="ts">
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
+import { api } from "@/api";
+import { useSessionStore } from "@/stores/session";
+import { useBankStore } from "@/stores/bank";
+import { useToastStore } from "@/stores/toast";
+import type { PracticeData, PracticeMode, Question } from "@/types";
+import AppIcon from "@/components/AppIcon.vue";
+import OptionList from "@/components/OptionList.vue";
+import ProgressRing from "@/components/ProgressRing.vue";
+import BaseModal from "@/components/BaseModal.vue";
+
+const props = defineProps<{ mode: string; category: string }>();
+const router = useRouter();
+const route = useRoute();
+const session = useSessionStore();
+const bank = useBankStore();
+const toast = useToastStore();
+
+const MODE_META: Record<PracticeMode, { label: string; icon: string; desc: string }> = {
+  practice: { label: "逐题练习", icon: "practice", desc: "先思考，再揭晓答案" },
+  random: { label: "随机练习", icon: "sparkles", desc: "错题加权；每轮覆盖全部题目" },
+  error: { label: "错题强化", icon: "errors", desc: "把答错的题逐一消化" },
+  favorite: { label: "收藏练习", icon: "star", desc: "只看你标记过的重点题" },
+};
+
+const mode = computed<PracticeMode>(() =>
+  (["practice", "random", "error", "favorite"].includes(props.mode)
+    ? props.mode
+    : "practice") as PracticeMode,
+);
+const category = computed(() =>
+  ["A", "B", "C"].includes(props.category.toUpperCase())
+    ? props.category.toUpperCase()
+    : "A",
+);
+
+const data = ref<PracticeData | null>(null);
+const loading = ref(true);
+const error = ref("");
+const index = ref(0);
+const selected = ref<string[]>([]);
+const revealed = ref(false);
+const results = ref<Record<number, "correct" | "wrong">>({});
+const imageOpen = ref(false);
+const navOpen = ref(false);
+const finished = ref(false);
+const saving = ref(false);
+
+const questions = computed<Question[]>(() => data.value?.questions ?? []);
+const question = computed<Question | null>(() => questions.value[index.value] ?? null);
+const total = computed(() => questions.value.length);
+const isMulti = computed(() => question.value?.type === 2);
+const answerLetters = computed(() => sortedLetters(question.value?.T ?? ""));
+const isFavorite = computed(() =>
+  question.value ? bank.favoriteIds.has(question.value.id) : false,
+);
+const selectedSorted = computed(() => sortedLetters(selected.value.join("")));
+const isCorrect = computed(
+  () => !!question.value && selectedSorted.value === answerLetters.value,
+);
+const hasSelection = computed(() => selected.value.length > 0);
+
+const correctCount = computed(
+  () => Object.values(results.value).filter((r) => r === "correct").length,
+);
+const wrongCount = computed(
+  () => Object.values(results.value).filter((r) => r === "wrong").length,
+);
+const progressPercent = computed(() =>
+  total.value ? Math.round(((index.value + 1) / total.value) * 100) : 0,
+);
+const accuracy = computed(() => {
+  const done = correctCount.value + wrongCount.value;
+  return done ? Math.round((correctCount.value / done) * 100) : 0;
+});
+
+const modeMeta = computed(() => MODE_META[mode.value]);
+
+const options = computed(() => {
+  const q = question.value;
+  if (!q) return [];
+  return [
+    { key: "A", text: q.A },
+    { key: "B", text: q.B },
+    { key: "C", text: q.C },
+    { key: "D", text: q.D },
+  ];
+});
+
+function sortedLetters(raw: string) {
+  return [...new Set(raw.toUpperCase().replace(/[^A-D]/g, "").split(""))]
+    .sort()
+    .join("");
+}
+
+async function load(force = false) {
+  if (!session.user) return;
+  loading.value = true;
+  error.value = "";
+  finished.value = false;
+  results.value = {};
+  try {
+    const d = await bank.loadPractice(
+      session.user.id,
+      mode.value,
+      category.value,
+      force || mode.value === "random",
+    );
+    data.value = d;
+    index.value =
+      mode.value === "practice" || mode.value === "random"
+        ? Math.min(d.progress, Math.max(0, d.total - 1))
+        : 0;
+    const startId = Number(route.query.start);
+    if (startId) {
+      const found = d.questions.findIndex((q) => q.id === startId);
+      if (found >= 0) index.value = found;
+    }
+    resetQuestion();
+  } catch (e: any) {
+    error.value = e?.message || "加载练习失败";
+  } finally {
+    loading.value = false;
+  }
+}
+
+function resetQuestion() {
+  selected.value = [];
+  revealed.value = false;
+}
+
+function select(key: string) {
+  if (revealed.value) return;
+  if (isMulti.value) {
+    selected.value = selected.value.includes(key)
+      ? selected.value.filter((k) => k !== key)
+      : [...selected.value, key].sort();
+  } else {
+    selected.value = [key];
+  }
+}
+
+async function reveal() {
+  if (!question.value || revealed.value) return;
+  revealed.value = true;
+  const correct = isCorrect.value;
+  if (hasSelection.value) {
+    results.value = { ...results.value, [index.value]: correct ? "correct" : "wrong" };
+  }
+
+  if (!correct && hasSelection.value && mode.value !== "error") {
+    try {
+      await api.addError(session.user!.id, question.value.id, category.value);
+      toast.warning("已加入错题本", "稍后可在错题强化中复习");
+    } catch (e: any) {
+      toast.error("加入错题本失败", e?.message);
+    }
+  }
+  if (correct && mode.value === "error") {
+    toast.success("这道题已经掌握", "可以移出错题本了");
+  }
+}
+
+async function next() {
+  if (!revealed.value) {
+    await reveal();
+    return;
+  }
+  if (index.value >= total.value - 1) {
+    if (mode.value === "random" && session.user) {
+      // 标记本轮完成，下次进入随机练习会生成新的一轮
+      try {
+        await api.saveRandomProgress(session.user.id, category.value, total.value);
+      } catch {
+        /* ignore */
+      }
+    }
+    finished.value = true;
+    return;
+  }
+  index.value++;
+  resetQuestion();
+  await saveProgress();
+}
+
+async function prev() {
+  if (index.value <= 0) return;
+  index.value--;
+  resetQuestion();
+  await saveProgress();
+}
+
+async function jumpTo(i: number) {
+  if (i < 0 || i >= total.value) return;
+  index.value = i;
+  resetQuestion();
+  navOpen.value = false;
+  await saveProgress();
+}
+
+async function saveProgress() {
+  if (!session.user) return;
+  if (mode.value === "random") {
+    saving.value = true;
+    try {
+      await api.saveRandomProgress(session.user.id, category.value, index.value);
+    } catch {
+      /* 进度保存失败不打断练习 */
+    } finally {
+      saving.value = false;
+    }
+    return;
+  }
+  if (mode.value !== "practice") return;
+  saving.value = true;
+  try {
+    await api.saveProgress(session.user.id, category.value, index.value);
+    bank.updateProgress(mode.value, category.value, index.value);
+  } catch {
+    /* 进度保存失败不打断练习 */
+  } finally {
+    saving.value = false;
+  }
+}
+
+async function toggleFavorite() {
+  if (!question.value || !session.user) return;
+  const q = question.value;
+  const wasFavorite = isFavorite.value;
+  try {
+    if (wasFavorite) {
+      await api.removeFavorite(session.user.id, q.id);
+      bank.setFavorite(q.id, false);
+      toast.info("已取消收藏");
+      if (mode.value === "favorite") await removeCurrentFromList();
+    } else {
+      await api.addFavorite(session.user.id, q.id, category.value);
+      bank.setFavorite(q.id, true);
+      toast.success("已加入收藏");
+    }
+  } catch (e: any) {
+    toast.error("收藏操作失败", e?.message);
+  }
+}
+
+async function removeFromErrors() {
+  if (!question.value || !session.user) return;
+  try {
+    await api.removeError(session.user.id, question.value.id);
+    toast.success("已移出错题本");
+    if (mode.value === "error") await removeCurrentFromList();
+  } catch (e: any) {
+    toast.error("操作失败", e?.message);
+  }
+}
+
+async function removeCurrentFromList() {
+  if (!data.value) return;
+  const id = question.value?.id;
+  data.value.questions = data.value.questions.filter((q) => q.id !== id);
+  if (index.value >= data.value.questions.length) {
+    index.value = Math.max(0, data.value.questions.length - 1);
+  }
+  resetQuestion();
+  if (!data.value.questions.length) {
+    finished.value = true;
+  }
+}
+
+async function restart() {
+  if (mode.value === "random") {
+    // 重新生成一轮（完成时会清除队列状态）
+    await load(true);
+    return;
+  }
+  results.value = {};
+  index.value = 0;
+  finished.value = false;
+  resetQuestion();
+  saveProgress();
+}
+
+function switchMode(next: "practice" | "random") {
+  if (next === mode.value) return;
+  router.push(`/practice/${next}/${category.value}`);
+}
+
+function back() {
+  router.push("/home");
+}
+
+function onKey(e: KeyboardEvent) {
+  if (imageOpen.value || navOpen.value || finished.value) return;
+  const target = e.target as HTMLElement;
+  if (["INPUT", "TEXTAREA"].includes(target?.tagName)) return;
+
+  const key = e.key.toUpperCase();
+  if (["A", "B", "C", "D", "1", "2", "3", "4"].includes(key)) {
+    const letter = "1234".includes(key) ? "ABCD"[Number(key) - 1] : key;
+    select(letter);
+    e.preventDefault();
+  } else if (e.key === "Enter" || e.key === " ") {
+    if (!revealed.value) reveal();
+    else next();
+    e.preventDefault();
+  } else if (e.key === "ArrowLeft") {
+    prev();
+  } else if (e.key === "ArrowRight") {
+    next();
+  } else if (e.key === "f" || e.key === "F") {
+    toggleFavorite();
+  }
+}
+
+watch(
+  () => [props.mode, props.category],
+  () => load(),
+);
+
+onMounted(() => {
+  load();
+  window.addEventListener("keydown", onKey);
+});
+onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
+</script>
+
 <template>
-  <div class="practice-container">
-    <!-- 顶部导航 -->
-    <div class="header">
-      <div class="back-btn" @click="goBack">
-        <el-icon :size="30"><Back /></el-icon>
-        <span>返回</span>
-      </div>
-      <div class="info-text">
-        {{ infoText }}
-      </div>
-      <div style="width: 100px;"></div>
-    </div>
-
-    <!-- 题目区域 -->
-    <div class="question-area" v-if="currentQuestion">
-      <div class="question-header">
-        <div class="question-text">
-          <span class="question-number">第 {{ currentIndex + 1 }}/{{ totalQuestions }} 题</span>
-          <span class="question-type">({{ questionTypeText }})</span>
-          <span class="question-content">{{ currentQuestion.Q }}</span>
-        </div>
-        <div class="favorite-btn" @click="toggleFavorite">
-          <el-icon :size="30" :color="isFavorite ? '#F7BA2A' : '#C0C4CC'">
-            <Star v-if="isFavorite" />
-            <StarFilled v-else />
-          </el-icon>
-          <span>收藏</span>
-        </div>
-      </div>
-
-      <!-- 图片显示 -->
-      <div class="question-image" v-if="currentQuestion.hasImage && currentQuestion.imageBase64">
-        <img :src="currentQuestion.imageBase64" alt="题目图片" @click="viewImage" />
-      </div>
-
-      <!-- 选项区域 -->
-      <div class="options-area">
-        <div
-          v-for="option in options"
-          :key="option.key"
-          :class="['option-item', { 
-            'selected': userAnswer === option.key || (currentQuestion?.type === 2 && userAnswers.includes(option.key)),
-            'correct': showAnswer && currentQuestion.T?.includes(option.key),
-            'wrong': showAnswer && (userAnswer === option.key || userAnswers.includes(option.key)) && !currentQuestion.T?.includes(option.key)
-          }]"
-          @click="selectAnswer(option.key)"
-        >
-          <span class="option-key">{{ option.key }}.</span>
-          <span class="option-text">{{ option.text }}</span>
-        </div>
-      </div>
-
-      <!-- 答案显示 -->
-      <div class="answer-feedback">
-        <!-- 刮刮卡遮罩层 - 一直显示直到被点击 -->
-        <div class="scratch-overlay" v-show="!answerRevealed" @click="revealAnswer">
-          <div class="scratch-hint">
-            <el-icon :size="40"><View /></el-icon>
-            <p>点击查看答案</p>
+  <div class="page practice-page">
+    <header class="practice-head">
+      <button class="back-btn" @click="back">
+        <AppIcon name="arrowLeft" :size="17" />
+        返回
+      </button>
+      <div class="head-copy">
+        <span class="eyebrow">{{ modeMeta.label }} · {{ category }} 类</span>
+        <h1 class="page-title">{{ modeMeta.label }}</h1>
+        <p class="page-sub">{{ modeMeta.desc }}</p>
+        <div v-if="mode === 'practice' || mode === 'random'" class="mode-switch">
+          <div class="segmented">
+            <button
+              :class="{ active: mode === 'practice' }"
+              @click="switchMode('practice')"
+            >
+              顺序练习
+            </button>
+            <button
+              :class="{ active: mode === 'random' }"
+              @click="switchMode('random')"
+            >
+              随机练习
+            </button>
           </div>
         </div>
-        
-        <div :class="['answer-text', userAnswer === currentQuestion.T ? 'correct' : 'wrong']" v-show="answerRevealed">
-          <span v-if="userAnswer === currentQuestion.T">✓ 回答正确</span>
-          <span v-else>✗ 回答错误</span>
-        </div>
-        <div class="correct-answer" v-show="answerRevealed">
-          正确答案：<strong>{{ currentQuestion.T }}</strong>
-        </div>
-        <div class="analysis" v-if="currentQuestion.analysis && answerRevealed">
-          <strong>解析：</strong>{{ currentQuestion.analysis }}
-        </div>
       </div>
+      <div class="head-actions" v-if="question">
+        <button
+          class="btn btn-sm"
+          :class="isFavorite ? 'btn-accent' : 'btn-ghost'"
+          @click="toggleFavorite"
+        >
+          <AppIcon name="star" :size="15" />
+          {{ isFavorite ? "已收藏" : "收藏" }}
+        </button>
+        <button
+          v-if="mode === 'error'"
+          class="btn btn-sm btn-ghost"
+          @click="removeFromErrors"
+        >
+          <AppIcon name="check" :size="15" />
+          移出错题
+        </button>
+        <button class="btn btn-sm btn-soft" @click="navOpen = true">
+          <AppIcon name="grid" :size="15" />
+          题目列表
+        </button>
+      </div>
+    </header>
 
-      <!-- 底部按钮 -->
-      <div class="bottom-buttons">
-        <el-button @click="previousQuestion" :disabled="currentIndex === 0">
-          <el-icon><ArrowLeft /></el-icon>
-          上一题
-        </el-button>
-        <el-button type="primary" @click="nextQuestion">
-          <el-icon v-if="currentIndex < totalQuestions - 1"><ArrowRight /></el-icon>
-          {{ currentIndex < totalQuestions - 1 ? '下一题' : '完成' }}
-        </el-button>
-      </div>
+    <div v-if="error" class="error-box">
+      <AppIcon name="warning" :size="15" />
+      {{ error }}
+      <button class="btn btn-sm btn-ghost" @click="load(true)">重试</button>
     </div>
 
-    <!-- 图片查看对话框 -->
-    <el-dialog v-model="imageDialogVisible" title="查看图片" width="auto">
-      <div class="image-container">
-        <img :src="currentImage" alt="题目图片" style="max-width: 100%;" />
+    <div v-if="loading" class="practice-loading">
+      <div class="skeleton" style="height: 60px" />
+      <div class="skeleton" style="height: 420px" />
+    </div>
+
+    <div v-else-if="finished || !total" class="empty surface">
+      <div class="empty-icon">
+        <AppIcon :name="total ? 'check' : mode === 'error' ? 'errors' : 'folder'" :size="28" />
       </div>
-    </el-dialog>
+      <template v-if="total">
+        <h2 class="empty-title">
+          {{ mode === "random" ? "本轮随机练习完成" : "本轮练习完成" }}
+        </h2>
+        <p class="empty-text">
+          共 {{ total }} 题，已作答 {{ correctCount + wrongCount }} 题，
+          答对 {{ correctCount }} 题，正确率 {{ accuracy }}%。
+        </p>
+        <div class="done-actions">
+          <button class="btn btn-ghost" @click="restart">再练一遍</button>
+          <button class="btn btn-accent" @click="back">返回总览</button>
+        </div>
+      </template>
+      <template v-else>
+        <h2 class="empty-title">
+          {{ mode === "error" ? "错题本还是空的" : mode === "favorite" ? "还没有收藏题目" : "这个类别还没有题目" }}
+        </h2>
+        <p class="empty-text">
+          {{
+            mode === "error"
+              ? "练习中答错的题会自动收集到这里，先去练几题吧。"
+              : mode === "favorite"
+                ? "练习时点右上角收藏，就能在这里集中复习。"
+                : "题库为空，请先在设置中导入 ZIP 题库包。"
+          }}
+        </p>
+        <button
+          class="btn btn-accent"
+          @click="
+            router.push(
+              mode === 'practice' || mode === 'random'
+                ? '/settings'
+                : `/practice/practice/${category}`,
+            )
+          "
+        >
+          {{ mode === "practice" || mode === "random" ? "去导入题库" : "去练习" }}
+        </button>
+      </template>
+    </div>
+
+    <div v-else-if="question" class="practice-grid">
+      <section class="q-card surface rise">
+        <div class="q-top">
+          <div class="q-meta">
+            <span class="chip" :class="isMulti ? 'chip-teal' : 'chip-amber'">
+              {{ isMulti ? "多选题" : "单选题" }}
+            </span>
+            <span class="chip chip-outline">{{ category }} 类</span>
+            <span class="q-index mono">{{ index + 1 }} / {{ total }}</span>
+          </div>
+          <span class="q-code mono">{{ question.J }}</span>
+        </div>
+
+        <h2 class="q-stem">{{ question.Q }}</h2>
+
+        <div v-if="question.F" class="q-image" @click="imageOpen = true">
+          <img :src="question.F" alt="题目图片" />
+          <span class="q-image-hint"><AppIcon name="search" :size="13" /> 点击放大</span>
+        </div>
+
+        <OptionList
+          :options="options"
+          :selected="selected"
+          :revealed="revealed"
+          :correct="answerLetters"
+          :multi="isMulti"
+          @select="select"
+        />
+
+        <transition name="page">
+          <div v-if="revealed" class="feedback" :class="isCorrect ? 'ok' : 'bad'">
+            <div class="feedback-icon">
+              <AppIcon :name="isCorrect ? 'check' : 'x'" :size="18" :stroke-width="2.4" />
+            </div>
+            <div class="feedback-body">
+              <strong>
+                {{ isCorrect ? "回答正确" : hasSelection ? "回答错误" : "未作答" }}
+              </strong>
+              <p>
+                正确答案：<b class="mono">{{ answerLetters }}</b>
+                <span v-if="!isCorrect && hasSelection && mode !== 'error'">
+                  · 已自动加入错题本
+                </span>
+                <span v-else-if="!isCorrect && mode === 'error'">· 这道题已收在错题本</span>
+                <span v-else-if="!isCorrect && !hasSelection">· 未作答不会加入错题本</span>
+              </p>
+            </div>
+          </div>
+        </transition>
+
+        <div class="q-actions">
+          <button class="btn btn-ghost" @click="prev" :disabled="index === 0">
+            <AppIcon name="chevronLeft" :size="16" />
+            上一题
+          </button>
+          <span class="spacer" />
+          <button v-if="!revealed" class="btn btn-accent btn-lg" @click="reveal">
+            <AppIcon name="eye" :size="17" />
+            查看答案
+          </button>
+          <button v-else class="btn btn-lg" @click="next">
+            {{ index === total - 1 ? "完成本轮" : "下一题" }}
+            <AppIcon name="arrowRight" :size="17" />
+          </button>
+        </div>
+      </section>
+
+      <aside class="q-side">
+        <section class="surface card-pad side-card">
+          <ProgressRing
+            :value="progressPercent"
+            :size="128"
+            :label="mode === 'random' ? '本轮进度' : '本组进度'"
+            :sub="`${index + 1} / ${total}`"
+            color="var(--amber)"
+          />
+          <div class="side-stats">
+            <div>
+              <strong style="color: var(--green)">{{ correctCount }}</strong>
+              <span>答对</span>
+            </div>
+            <div>
+              <strong style="color: var(--red)">{{ wrongCount }}</strong>
+              <span>答错</span>
+            </div>
+            <div>
+              <strong>{{ accuracy }}%</strong>
+              <span>正确率</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="surface card-pad side-card">
+          <h3 class="side-title">快捷键</h3>
+          <ul class="shortcuts">
+            <li><kbd>A</kbd><kbd>B</kbd><kbd>C</kbd><kbd>D</kbd><span>选择答案</span></li>
+            <li><kbd>Enter</kbd><span>查看答案 / 下一题</span></li>
+            <li><kbd>←</kbd><kbd>→</kbd><span>上一题 / 下一题</span></li>
+            <li><kbd>F</kbd><span>收藏当前题</span></li>
+          </ul>
+        </section>
+
+        <section class="surface card-pad side-card progress-mini">
+          <div class="row gap-8">
+            <span class="dot" />
+            <span>{{ saving ? "正在保存进度…" : "练习进度自动保存" }}</span>
+          </div>
+          <div class="progress amber">
+            <span :style="{ width: progressPercent + '%' }" />
+          </div>
+        </section>
+      </aside>
+    </div>
+
+    <BaseModal
+      :open="imageOpen"
+      title="查看题目图片"
+      wide
+      @close="imageOpen = false"
+    >
+      <div class="image-full" v-if="question?.F">
+        <img :src="question.F" alt="题目图片" />
+      </div>
+    </BaseModal>
+
+    <BaseModal
+      :open="navOpen"
+      :title="`题目列表 · ${modeMeta.label}`"
+      :subtitle="`共 ${total} 题，点击跳转`"
+      wide
+      @close="navOpen = false"
+    >
+      <div class="nav-grid">
+        <button
+          v-for="(q, i) in questions"
+          :key="i"
+          class="nav-cell"
+          :class="[results[i] ?? '', { current: i === index }]"
+          @click="jumpTo(i)"
+        >
+          {{ i + 1 }}
+        </button>
+      </div>
+    </BaseModal>
   </div>
 </template>
 
-<script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
-import { Back, ArrowLeft, ArrowRight, Star, StarFilled, View } from '@element-plus/icons-vue'
-import { useUserStore } from '@/stores/user'
-import { FavoriteService, PracticeService } from '@/api'
-import type { Question } from '@/types'
-
-// PracticeView 扩展的题目类型（含前端计算字段）
-interface PracticeQuestion extends Question {
-  hasImage?: boolean
-  imageBase64?: string
-  analysis?: string
-}
-
-// 定义 props
-const props = defineProps<{
-  category: 'A' | 'B' | 'C'
-  mode: 'practice' | 'error' | 'favorite'
-}>()
-
-const userStore = useUserStore()
-
-const currentQuestion = ref<PracticeQuestion | null>(null)
-const currentIndex = ref(0)
-const totalQuestions = ref(0)
-const userAnswer = ref('')
-const userAnswers = ref<string[]>([]) // 用于多选题
-const showAnswer = ref(false)
-const answerRevealed = ref(false) // 答案是否已显示（刮刮卡）
-const isWrongAnswer = ref(false) // 标记是否答错
-const isFavorite = ref(false)
-const imageDialogVisible = ref(false)
-const currentImage = ref('')
-const isSubmitting = ref(false) // 防止重复提交
-
-const infoText = computed(() => {
-  const modeText = props.mode === 'error' ? '错题' : props.mode === 'favorite' ? '收藏' : '练习'
-  return `${props.category}类${modeText} - 共${totalQuestions.value}题`
-})
-
-const questionTypeText = computed(() => {
-  if (!currentQuestion.value) return ''
-  return currentQuestion.value.type === 1 ? '单选题' : '多选题'
-})
-
-const options = computed(() => {
-  if (!currentQuestion.value) return []
-  
-  // 单选题和多选题都显示 ABCD 选项（不打乱顺序）
-  return [
-    { key: 'A', text: currentQuestion.value.A },
-    { key: 'B', text: currentQuestion.value.B },
-    { key: 'C', text: currentQuestion.value.C },
-    { key: 'D', text: currentQuestion.value.D }
-  ]
-})
-
-const loadQuestion = async () => {
-  try {
-    let questions: any[] = []
-    
-    // 根据模式获取不同的题目
-    if (props.mode === 'error') {
-      // 只做错题模式
-      const userID = userStore.currentUser?.user_id || 0
-      console.log('加载错题，userID:', userID, 'category:', props.category)
-      questions = await FavoriteService.GetErrorQuestionsByCategory(userID, props.category)
-      console.log('错题数量:', questions.length)
-      if (questions.length > 0) {
-        console.log('第一道错题:', questions[0])
-      }
-    } else if (props.mode === 'favorite') {
-      // 只做收藏模式
-      const userID = userStore.currentUser?.user_id || 0
-      console.log('加载收藏题目，userID:', userID, 'category:', props.category)
-      questions = await FavoriteService.GetFavoriteQuestionsByCategory(userID, props.category)
-      console.log('收藏题目数量:', questions.length)
-    } else {
-      // 逐题练习模式
-      const result = await PracticeService.GetQuestionsByCategory(props.category)
-      questions = result || []
-    }
-    
-    if (questions.length === 0) {
-      const modeText = props.mode === 'error' ? '错题' : props.mode === 'favorite' ? '收藏' : '练习'
-      ElMessage.warning({
-        message: `"${props.category}类${modeText}"题库为空，2 秒后返回首页`,
-        duration: 2000
-      })
-      setTimeout(() => {
-        emit('back')
-      }, 2000)
-      return
-    }
-    
-    // 如果是第一次加载，从保存的进度开始（仅逐题练习模式）；否则使用当前索引
-    if (currentQuestion.value === null && props.mode === 'practice') {
-      const progress = await PracticeService.GetPracticeProgress(userStore.currentUser!.user_id, props.category)
-      currentIndex.value = progress
-      // 确保索引不超出范围
-      if (currentIndex.value >= questions.length) {
-        currentIndex.value = 0
-      }
-    }
-    
-    currentQuestion.value = questions[currentIndex.value]
-    totalQuestions.value = questions.length
-    userAnswer.value = ''
-    userAnswers.value = []
-    showAnswer.value = false
-    answerRevealed.value = false  // 重置刮刮卡状态
-    isWrongAnswer.value = false  // 重置答错标记
-    isSubmitting.value = false
-    
-    // 检查是否已收藏（仅收藏模式需要）
-    if (props.mode === 'favorite') {
-      isFavorite.value = true
-    } else {
-      const favorites = await FavoriteService.GetFavoriteQuestionsByCategory(userStore.currentUser!.user_id, props.category)
-      isFavorite.value = favorites.some((q: any) => q.id === currentQuestion.value!.id)
-    }
-  } catch (error: any) {
-    ElMessage.error(error.message || '加载题目失败')
-    console.error('Load question error:', error)
-  }
-}
-
-// 添加排序函数
-const sortString = (str: string): string => {
-  return str.split('').sort().join('')
-}
-
-const selectAnswer = async (key: string) => {
-  if (!currentQuestion.value || isSubmitting.value) return
-  
-  isSubmitting.value = true
-  
-  if (currentQuestion.value.type === 1) {
-    // 单选题
-    userAnswer.value = key
-  } else {
-    // 多选题
-    const index = userAnswers.value.indexOf(key)
-    if (index > -1) {
-      userAnswers.value.splice(index, 1)
-    } else {
-      userAnswers.value.push(key)
-    }
-    userAnswer.value = userAnswers.value.join('')
-  }
-  
-  // 只保存答案，不立即显示和判断
-  // 答案判断在 nextQuestion/previousQuestion 中进行
-  
-  isSubmitting.value = false
-}
-
-// 刮刮卡：点击查看答案，触发判题逻辑
-const revealAnswer = () => {
-  if (!currentQuestion.value) return
-  
-  // 判断答案是否正确（未答题也视为错误）
-  const isCorrect = sortString(userAnswer.value) === sortString(currentQuestion.value.T)
-  
-  // 显示答案
-  showAnswer.value = true
-  answerRevealed.value = true  // 移除遮罩，显示答案
-  
-  // 如果答错了（包括未答题），标记并加入错题本
-  if (!isCorrect) {
-    isWrongAnswer.value = true
-    // 未答题也视同答错，需要加入错题本
-    FavoriteService.AddToErrorBook(userStore.currentUser!.user_id, currentQuestion.value!.id, props.category)
-      .catch(err => {
-        console.error('Add to error book error:', err)
-        ElMessage.error('加入错题本失败')
-      })
-  } else {
-    isWrongAnswer.value = false
-  }
-}
-
-const nextQuestion = async () => {
-  // 如果已经显示答案
-  if (showAnswer.value) {
-    // 如果是答错后再次点击，才切换题目
-    if (isWrongAnswer.value) {
-      if (currentIndex.value < totalQuestions.value - 1) {
-        await PracticeService.SavePracticeProgress(userStore.currentUser!.user_id, props.category, currentIndex.value + 1)
-        currentIndex.value++
-        loadQuestion()
-      } else {
-        ElMessage.success('练习完成！')
-        goBack()
-      }
-      return
-    }
-    
-    // 答对的情况下直接切换
-    if (currentIndex.value < totalQuestions.value - 1) {
-      await PracticeService.SavePracticeProgress(userStore.currentUser!.user_id, props.category, currentIndex.value + 1)
-      currentIndex.value++
-      loadQuestion()
-    } else {
-      ElMessage.success('练习完成！')
-      goBack()
-    }
-    return
-  }
-  
-  // 答案未显示：先点击遮罩（判题 + 加入错题本）
-  revealAnswer()
-  
-  // 如果答错了，不自动切换，等待用户再次点击
-  if (isWrongAnswer.value) {
-    return
-  }
-  
-  // 答对的情况下，延迟 1 秒后切换
-  setTimeout(async () => {
-    if (currentIndex.value < totalQuestions.value - 1) {
-      await PracticeService.SavePracticeProgress(userStore.currentUser!.user_id, props.category, currentIndex.value + 1)
-      currentIndex.value++
-      loadQuestion()
-    } else {
-      ElMessage.success('练习完成！')
-      goBack()
-    }
-  }, 1000)
-}
-
-const previousQuestion = async () => {
-  // 如果已经显示答案
-  if (showAnswer.value) {
-    // 如果是答错后再次点击，才切换题目
-    if (isWrongAnswer.value) {
-      if (currentIndex.value > 0) {
-        await PracticeService.SavePracticeProgress(userStore.currentUser!.user_id, props.category, currentIndex.value - 1)
-        currentIndex.value--
-        loadQuestion()
-      }
-      return
-    }
-    
-    // 答对的情况下直接切换
-    if (currentIndex.value > 0) {
-      await PracticeService.SavePracticeProgress(userStore.currentUser!.user_id, props.category, currentIndex.value - 1)
-      currentIndex.value--
-      loadQuestion()
-    }
-    return
-  }
-  
-  // 答案未显示：先点击遮罩（判题 + 加入错题本）
-  revealAnswer()
-  
-  // 如果答错了，不自动切换，等待用户再次点击
-  if (isWrongAnswer.value) {
-    return
-  }
-  
-  // 答对的情况下，延迟 1 秒后切换
-  setTimeout(async () => {
-    if (currentIndex.value > 0) {
-      await PracticeService.SavePracticeProgress(userStore.currentUser!.user_id, props.category, currentIndex.value - 1)
-      currentIndex.value--
-      loadQuestion()
-    }
-  }, 1000)
-}
-
-const toggleFavorite = async () => {
-  try {
-    if (isFavorite.value) {
-      await FavoriteService.RemoveFromFavorite(userStore.currentUser!.user_id, currentQuestion.value!.id)
-      ElMessage.success('已取消收藏')
-    } else {
-      await FavoriteService.AddToFavorite(userStore.currentUser!.user_id, currentQuestion.value!.id, props.category)
-      ElMessage.success('已加入收藏')
-    }
-    isFavorite.value = !isFavorite.value
-  } catch (error: any) {
-    ElMessage.error(error.message || '操作失败')
-    console.error('Toggle favorite error:', error)
-  }
-}
-
-const viewImage = () => {
-  if (currentQuestion.value?.imageBase64) {
-    currentImage.value = currentQuestion.value.imageBase64
-    imageDialogVisible.value = true
-  }
-}
-
-// 定义 emit
-const emit = defineEmits<{
-  back: []
-}>()
-
-const goBack = () => {
-  emit('back')
-}
-
-onMounted(() => {
-  loadQuestion()
-})
-</script>
-
 <style scoped>
-.practice-container {
-  width: 100%;
-  height: 100vh;
-  padding: 20px;
-  background: #f5f7fa;
+.practice-page {
+  max-width: 1200px;
+}
+.practice-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 22px;
+  margin-bottom: 24px;
+}
+.back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-3);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  margin-top: 4px;
+  transition: all 0.15s;
+}
+.back-btn:hover {
+  color: var(--ink);
+  border-color: var(--line-strong);
+}
+.head-copy {
+  flex: 1;
+}
+.head-copy .page-title {
+  margin-top: 5px;
+}
+.head-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.mode-switch {
+  margin-top: 12px;
+}
+.mode-switch .segmented button {
+  height: 28px;
+  padding: 0 12px;
+}
+
+.practice-loading {
   display: flex;
   flex-direction: column;
+  gap: 16px;
+}
+.practice-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 268px;
+  gap: 20px;
+  align-items: start;
 }
 
-.header {
+.q-card {
+  padding: 28px 32px 24px;
+}
+.q-top {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.q-meta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+.q-index {
+  font-size: 11px;
+  color: var(--muted);
+  margin-left: 4px;
+}
+.q-code {
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 0.06em;
+}
+.q-stem {
+  font-size: 21px;
+  line-height: 1.65;
+  font-weight: 700;
+  letter-spacing: -0.01em;
   margin-bottom: 20px;
 }
-
-.back-btn {
-  display: flex;
+.q-image {
+  position: relative;
+  margin: 0 0 20px;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  cursor: zoom-in;
+  background: var(--navy);
+}
+.q-image img {
+  width: 100%;
+  max-height: 320px;
+  object-fit: contain;
+}
+.q-image-hint {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  display: inline-flex;
   align-items: center;
   gap: 5px;
-  cursor: pointer;
-  color: #666;
-  padding: 10px;
-  border-radius: 5px;
-  transition: all 0.3s;
+  padding: 5px 9px;
+  border-radius: 99px;
+  font-size: 10px;
+  color: #f4f0e6;
+  background: rgba(16, 24, 32, 0.65);
+  backdrop-filter: blur(6px);
 }
-
-.back-btn:hover {
-  background: #e6e6e6;
-  color: #409EFF;
-}
-
-.info-text {
-  font-size: 18px;
-  font-weight: 600;
-  color: #333;
-}
-
-.question-area {
-  flex: 1;
-  background: white;
-  border-radius: 10px;
-  padding: 30px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+.feedback {
   display: flex;
-  flex-direction: column;
-}
-
-.question-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 15px;
-}
-
-.question-text {
-  flex: 1;
-  font-size: 18px;
-  line-height: 1.8;
-  color: #333;
-}
-
-.question-number {
-  font-weight: 600;
-  margin-right: 10px;
-}
-
-.question-type {
-  color: #666;
-  margin-right: 10px;
-}
-
-.question-content {
-  color: #333;
-}
-
-.favorite-btn {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  cursor: pointer;
-  padding: 8px;
-  border-radius: 5px;
-  transition: all 0.3s;
-  gap: 3px;
-  margin-left: 15px;
-}
-
-.favorite-btn:hover {
-  background: #f5f5f5;
-}
-
-.favorite-btn span {
-  font-size: 12px;
-  color: #666;
-}
-
-.question-image {
-  text-align: center;
-  margin: 0 0 10px 0;
-}
-
-.question-image img {
-  max-width: 100%;
-  max-height: 400px;
-  cursor: pointer;
-  border-radius: 5px;
-}
-
-.options-area {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
   gap: 12px;
-  margin: 0 0 5px 0;
+  padding: 15px 17px;
+  border-radius: 13px;
+  margin-top: 18px;
 }
-
-.option-item {
-  display: flex;
-  align-items: flex-start;
-  padding: 15px 20px;
-  border: 2px solid #e6e6e6;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.3s;
+.feedback.ok {
+  background: var(--green-soft);
+  border: 1px solid rgba(77, 155, 106, 0.25);
 }
-
-.option-item:hover {
-  border-color: #409EFF;
-  background: #f0f9ff;
+.feedback.bad {
+  background: var(--red-soft);
+  border: 1px solid rgba(208, 92, 77, 0.22);
 }
-
-.option-item.selected {
-  border-color: #409EFF;
-  background: #ecf5ff;
+.feedback-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  flex: none;
 }
-
-.option-item.correct {
-  border-color: #67c23a !important;
-  background: #f0f9eb !important;
+.feedback.ok .feedback-icon { background: var(--green); }
+.feedback.bad .feedback-icon { background: var(--red); }
+.feedback-body strong {
+  font-size: 13.5px;
+  font-weight: 700;
 }
-
-.option-item.wrong {
-  border-color: #f56c6c !important;
-  background: #fef0f0 !important;
+.feedback.ok .feedback-body strong { color: #2f7148; }
+.feedback.bad .feedback-body strong { color: #a63b2e; }
+.feedback-body p {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--ink-2);
 }
-
-.option-key {
-  font-weight: 600;
-  margin-right: 10px;
-  color: #409EFF;
-}
-
-.option-text {
-  flex: 1;
-  font-size: 16px;
-  line-height: 1.6;
-  color: #333;
-}
-
-.answer-feedback {
-  margin-top: auto;
-  margin-bottom: 30px;
-  padding: 15px 20px;
-  border-radius: 8px;
-  background: #f5f7fa;
-  position: relative;
-  min-height: 80px;
-}
-
-/* 刮刮卡遮罩层 */
-.scratch-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  border-radius: 8px;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  cursor: pointer;
-  transition: all 0.3s;
-  z-index: 10;
-}
-
-.scratch-overlay:hover {
-  background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
-  transform: scale(1.02);
-}
-
-.scratch-hint {
-  text-align: center;
-  color: white;
-}
-
-.scratch-hint p {
-  margin: 10px 0 0 0;
-  font-size: 16px;
-  font-weight: 600;
-}
-
-.answer-text {
-  font-size: 16px;
-  font-weight: 600;
-  margin-bottom: 8px;
-}
-
-.answer-text.correct {
-  color: #67c23a;
-}
-
-.answer-text.wrong {
-  color: #f56c6c;
-}
-
-.correct-answer {
-  font-size: 14px;
-  margin-bottom: 8px;
-  color: #333;
-}
-
-.analysis {
+.feedback-body b {
+  color: var(--ink);
   font-size: 13px;
-  line-height: 1.5;
-  color: #666;
 }
-
-.bottom-buttons {
+.q-actions {
   display: flex;
-  justify-content: center;
-  gap: 20px;
-  padding-top: 15px;
-  border-top: 1px solid #e6e6e6;
-  margin-top: 15px;
-  margin-bottom: 5px;
+  align-items: center;
+  gap: 10px;
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
 }
 
-.bottom-buttons .el-button {
-  min-width: 120px;
+.q-side {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  position: sticky;
+  top: 20px;
 }
-
-.image-container {
-  text-align: center;
+.side-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
   padding: 20px;
+}
+.side-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  width: 100%;
+  gap: 6px;
+  margin-top: 8px;
+}
+.side-stats div {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 9px 4px;
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+.side-stats strong {
+  font-size: 15px;
+  font-weight: 800;
+}
+.side-stats span {
+  font-size: 9.5px;
+  color: var(--ink-3);
+}
+.side-title {
+  align-self: flex-start;
+  font-size: 13px;
+  font-weight: 750;
+  margin-bottom: 4px;
+}
+.shortcuts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+.shortcuts li {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10.5px;
+  color: var(--ink-3);
+}
+.shortcuts span {
+  margin-left: auto;
+}
+kbd {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 5px;
+  background: var(--surface-2);
+  border: 1px solid var(--line-strong);
+  border-bottom-width: 2px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  display: inline-grid;
+  place-items: center;
+  color: var(--ink-2);
+}
+.progress-mini {
+  align-items: stretch;
+  gap: 10px;
+}
+.progress-mini .row {
+  font-size: 11px;
+  color: var(--ink-3);
+}
+
+.done-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+}
+.image-full img {
+  width: 100%;
+  max-height: 70vh;
+  object-fit: contain;
+  border-radius: 12px;
+}
+.nav-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(42px, 1fr));
+  gap: 8px;
+}
+.nav-cell {
+  height: 40px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  font-size: 11.5px;
+  font-weight: 650;
+  color: var(--ink-2);
+  transition: all 0.14s;
+}
+.nav-cell:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-2);
+}
+.nav-cell.correct {
+  background: var(--green-soft);
+  border-color: rgba(77, 155, 106, 0.35);
+  color: #2f7148;
+}
+.nav-cell.wrong {
+  background: var(--red-soft);
+  border-color: rgba(208, 92, 77, 0.3);
+  color: #a63b2e;
+}
+.nav-cell.current {
+  border-color: var(--amber);
+  box-shadow: 0 0 0 3px rgba(232, 163, 61, 0.16);
+}
+
+.error-box {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  background: var(--red-soft);
+  color: #a63b2e;
+  padding: 12px 16px;
+  border-radius: 12px;
+  font-size: 13px;
+  margin-bottom: 18px;
+}
+
+@media (max-width: 1180px) {
+  .practice-grid {
+    grid-template-columns: 1fr;
+  }
+  .q-side {
+    position: static;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .progress-mini {
+    display: none;
+  }
 }
 </style>

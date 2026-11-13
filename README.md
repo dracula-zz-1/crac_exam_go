@@ -1,584 +1,324 @@
-# Amateur Radio Exam System
+# 业余无线电模拟考试 · HAM LAB v3
 
-**An intelligent exam simulation platform for CRAC (China Radio Association) amateur radio enthusiasts**
+面向 CRAC 业余无线电操作技术能力验证的本地模拟考试系统。相比旧版（`D:\crac_new\crac_exam_go`），本版本整体升级到 **Wails 3.1**，修复了旧版审查中发现的主要问题，重做了前端视觉与交互，并把题库导入改为 **仅支持 ZIP + 纯 Go 解析 PDF**。
 
-[🌐 English](README.md) | [🇨🇳 中文](README_zh.md)
+> 本项目位于独立目录 `D:\crac_new\crac_exam_v3`，不会修改或依赖旧目录。
+>
+> 真实题库（2025-08-09 版 ZIP）的逐字段校验结果见 [BANK_VERIFICATION.md](BANK_VERIFICATION.md)。
 
-[Features](#-features) • [Technology Stack](#-technology-stack) • [Installation](#-installation-and-usage) • [Development Guide](#-development-guide) • [FAQ](#-faq)
+---
 
-***
+## ✨ 主要变化
 
-## 📖 Introduction
+### 1. 升级 Wails 3
+- 使用 `github.com/wailsapp/wails/v3 v3.1.0`
+- 服务通过 `application.NewService` 注册，绑定由 `wails3 generate bindings` 生成
+- 原生文件选择框、原生文件拖放事件、导入进度事件（`import:progress`）
+- 可调整窗口大小（最小 1100×720），不再固定 1024×768
 
-The Amateur Radio Exam System is a modern exam preparation tool designed for the China Radio Association Amateur Radio Branch (CRAC). The system supports complete functionality for A/B/C class operator certificate exams, including question bank management, mock exams, error collection, and score statistics, helping candidates efficiently prepare for amateur radio operator certificate exams.
+### 2. 题库导入：只收 ZIP，纯 Go 解析
+- 只接受 `.zip`，ZIP 内必须包含 5 份 PDF：
+  - `总题库.pdf`
+  - `总题库附图标记.pdf`
+  - `A类题库.pdf`
+  - `B类题库.pdf`
+  - `C类题库.pdf`
+- 文本提取：`github.com/ledongthuc/pdf`（纯 Go）
+- 图片提取：`github.com/pdfcpu/pdfcpu`（纯 Go）
+- ZIP 解压：标准库 `archive/zip`（支持 GBK 文件名）
+- 不再依赖 Python / PyMuPDF / Pillow / unipdf / go-fitz
+- 解析全部在内存/临时目录完成，**解析成功后才在单个事务里替换题库**；失败不会破坏旧题库
+- 导入结果会返回题目数量、分类统计、带图数量、重复题号与警告
 
-## ✨ Features
+### 3. 修复的主要问题
+| 旧版问题 | 本版处理 |
+|---|---|
+| 错题练习 `Q[:50]` 越界崩溃风险 | 已移除不安全切片 |
+| 题库删除用 `parseInt(J)` 删错题 | 改为按数据库 `id` 删除，并清理收藏/错题引用 |
+| 考试时长恒为 0（前端传“当前时间”） | 服务端开考记时，交卷时由服务端计算，前端不可伪造 |
+| 导入先清库、失败即丢题库 | 解析与写库分离，写库使用单事务原子替换 |
+| 弃考记录按 0 分污染统计 | 增加考试状态；启动时清理“进行中”记录，统计只算已交卷 |
+| 交卷逐条更新、无幂等 | 交卷单事务 + 已交卷幂等返回 |
+| 题目不足仍按固定及格线 | 题目不足直接拒绝开考，并给出具体缺题数量 |
+| 大写 `.XLSX/.JSON` 不识别 | 现在只支持 ZIP，扩展名统一小写校验 |
+| 图片字段 `F` 与 `hasImage` 不一致 | 全链路统一使用 `F`，考试/练习/错题/收藏均可显示图片 |
+| 练习每翻一题重拉整个题库 | 进入页面一次加载，Pinia 缓存；翻题零 IPC |
+| 收藏数/练习正确率统计错误 | 统计口径重写，一次 `GetDashboard` 返回首页全部数据 |
+| 答案随考试题下发前端 | 考试接口返回不含 `T` 的题目 DTO，交卷由服务端判分 |
+| 多个页面无入口、大量重复代码 | 统一为 8 个页面与共享组件，删除死代码 |
+| SQLite 无 WAL / busy_timeout | 开启 WAL、busy_timeout=10s、单连接串行化 |
+| 数据写在 exe 目录（Program Files 不可写） | 数据写入用户目录，可用 `CRAC_EXAM_DATA_DIR` 覆盖 |
 
-### 🎯 Core Features
+### 4. 前端重做
+- 不再使用 Element Plus / ECharts 全量包，改为自建设计系统与轻量 SVG 图表
+- 视觉主题：深色侧栏 + 暖纸色内容区 + 琥珀色信号强调，呼应无线电主题
+- 页面：登录、总览、逐题练习、模拟考试、考试结果复盘、错题本、收藏夹、题库管理、设置
+- 交互：
+  - 练习支持键盘 `A-D / 1-4` 选择、`Enter` 查看/下一题、`←/→` 翻题、`F` 收藏
+  - 题目列表/答题卡、进度环、正确/错误统计、图片放大
+  - 考试倒计时、答题卡、未答提醒、时间到自动交卷、离开确认
+  - 题库管理支持搜索、分类筛选（OR 语义）、分页、编辑、图片上传、删除
+  - 导入进度实时显示、结果统计、警告列表
+  - 设置页支持从 GitHub Release 检查、下载并启动应用更新
+- 浏览器预览模式：直接用 `npm run dev` 打开时使用内置演示数据，方便调 UI；桌面端自动使用真实 Go 后端
 
-#### 1. Question Bank Management
+---
 
-- **Multi-format Import**: One-click PDF question bank import with automatic recognition of questions and answers
-- **Smart Classification**: Automatically identifies and classifies A/B/C class questions
-- **Question Types**: Supports single-choice, multiple-choice, true/false questions
-- **Image Support**: Supports questions with images, automatically extracts and saves them
-- **Batch Operations**: Supports batch delete, export, and search questions
+## 🧱 技术栈
 
-#### 2. Online Practice
+| 层 | 技术 |
+|---|---|
+| 桌面框架 | Wails v3.1.0 |
+| 后端 | Go 1.26 |
+| 数据库 | SQLite（`modernc.org/sqlite`，纯 Go，无 CGO）+ 显式 SQL |
+| PDF 文本 | `github.com/ledongthuc/pdf` |
+| PDF 图片 | `github.com/pdfcpu/pdfcpu` |
+| ZIP | `archive/zip` + `golang.org/x/text`（GBK 文件名） |
+| 日志 | `log/slog` + `lumberjack`（10MB 轮转，保留 5 份） |
+| 前端 | Vue 3 + TypeScript + Vite 8 + Pinia + Vue Router |
+| 图表 | 手写 SVG（无 ECharts） |
 
-- **Question-by-Question Practice**: Select questions by category, answer one by one with instant feedback
-- **Error Reinforcement**: Automatically collects wrong answers for targeted practice
-- **Favorites**: Bookmark important questions for focused review
-- **Progress Saving**: Automatically saves practice progress, continue anytime
+---
 
-#### 3. Mock Exam
+## 🚀 开发与构建
 
-- **Real Simulation**: Completely follows real exam question types and counts
-  - Class A: 32 single-choice + 8 multiple-choice, 40 questions/40 minutes, 30 correct to pass
-  - Class B: 45 single-choice + 15 multiple-choice, 60 questions/60 minutes, 45 correct to pass
-  - Class C: 70 single-choice + 20 multiple-choice, 90 questions/90 minutes, 70 correct to pass
-- **Smart Paper Generation**: Random question selection ensures different questions each time
-- **Timer**: Real-time countdown with automatic submission when time expires
-- **Instant Scoring**: Shows score and correct answers immediately after submission
-
-#### 4. Learning Statistics
-
-- **Score Trend Chart**: Visual display of exam score changes
-- **Category Statistics**: Separate statistics for A/B/C class practice and exams
-- **Error Analysis**: Statistics on error count and distribution for targeted review
-- **Time Range**: Supports last 7 days, last half year, last year, all time range
-
-### 🌟 Highlights
-
-1. **Intelligent**: Automatic PDF question bank recognition, no manual entry needed
-2. **Professional**: Fully complies with CRAC exam syllabus and question type requirements
-3. **User-friendly**: Thoughtful features like error book, favorites, progress saving
-4. **Visual**: Score trend charts, learning progress at a glance
-5. **Local**: All data stored locally, protecting privacy and security
-6. **Portable**: Single file execution, no installation required, no registry writes
-
-## 💻 Technology Stack
-
-### Tech Stack
-
-#### Backend
-
-- **Language**: Go 1.26.1
-- **Desktop Framework**: [Wails v2.12.0](https://wails.io/) - Modern Go desktop application framework
-- **Database**: SQLite (glebarez/sqlite - Pure Go implementation, no CGO required)
-- **Logging**: Logrus + Lumberjack (supports log rotation)
-- **PDF Processing**:
-  - Text Extraction: go-fitz (based on MuPDF)
-  - Image Extraction: unipdf (oliverpolkerton fork)
-- **Dependency Management**: Go Modules
-
-#### Frontend
-
-- **Framework**: Vue 3.5.13 (Composition API)
-- **UI Library**: Element Plus 2.9.6
-- **State Management**: Pinia 3.0.0
-- **Router**: Vue Router 4.5.0
-- **Build Tool**: Vite 5.4.21
-- **Chart Library**: ECharts 5.6.0
-- **Icons**: @element-plus/icons-vue
-- **Language**: TypeScript 5.8.3
-
-#### Architecture
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                     Frontend Layer (Vue 3)              │
-│  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐   │
-│  │ Home    │  │ Question│  │ Practice│  │ Exam    │   │
-│  └─────────┘  └─────────┘  └─────────┘  └─────────┘   │
-│  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐   │
-│  │ Errors  │  │ Favorites│ │ Stats   │  │ Settings│   │
-│  └─────────┘  └─────────┘  └─────────┘  └─────────┘   │
-└─────────────────────────────────────────────────────────┘
-                          ↕ Wails Runtime
-┌─────────────────────────────────────────────────────────┐
-│                    Service Layer (Go)                    │
-│  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐   │
-│  │ Question│  │ Practice│  │ Exam    │  │ Stats   │   │
-│  │ Service │  │ Service │  │ Service │  │ Service │   │
-│  └─────────┘  └─────────┘  └─────────┘  └─────────┘   │
-│  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐   │
-│  │ PDF     │  │ Import  │  │ Export  │  │ Favorite│   │
-│  │ Importer│  │ Service │  │ Service │  │ Service │   │
-│  └─────────┘  └─────────┘  └─────────┘  └─────────┘   │
-└─────────────────────────────────────────────────────────┘
-                          ↕
-┌─────────────────────────────────────────────────────────┐
-│                   Data Access Layer (DAO)                │
-│  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐   │
-│  │ Question│  │ Exam    │  │ Error   │  │ Favorite│   │
-│  │ DAO     │  │ DAO     │  │ DAO     │  │ DAO     │   │
-│  └─────────┘  └─────────┘  └─────────┘  └─────────┘   │
-└─────────────────────────────────────────────────────────┘
-                          ↕
-┌─────────────────────────────────────────────────────────┐
-│                    SQLite Database                       │
-│  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐   │
-│  │questions│  │exam_    │  │error_   │  │favorite_│   │
-│  │         │  │records  │  │questions│  │questions│   │
-│  └─────────┘  └─────────┘  └─────────┘  └─────────┘   │
-└─────────────────────────────────────────────────────────┘
-```
-
-### Project Structure
-
-```
-crac_exam_go/
-├── backend/                    # Go backend code
-│   ├── config/                # Configuration files
-│   ├── dao/                   # Data access layer
-│   ├── models/                # Data models
-│   └── services/              # Business logic layer
-├── frontend/                   # Vue frontend code
-│   ├── src/
-│   │   ├── api/               # API call wrappers
-│   │   ├── assets/            # Static assets
-│   │   ├── components/        # Common components
-│   │   ├── router/            # Router configuration
-│   │   ├── stores/            # Pinia state management
-│   │   ├── views/             # Page components
-│   │   └── wailsjs/           # Wails auto-generated
-│   ├── index.html             # Entry HTML
-│   └── package.json           # Frontend dependencies
-├── build/                      # Build output directory
-│   ├── bin/                   # Compiled executable
-│   └── appicon.ico            # Application icon
-├── release/                    # Release package directory
-│   ├── crac_exam.exe          # Main program
-│   └── crac_exam-windows-amd64.zip  # Compressed package
-├── logs/                       # Log directory (generated at runtime)
-├── data/                       # Data directory (generated at runtime)
-├── icon.ico                    # Application icon
-├── main.go                     # Go entry file
-├── wails.json                  # Wails configuration
-├── go.mod                      # Go dependencies
-└── README.md                   # Project documentation
-```
-
-## 📦 Installation and Usage
-
-### System Requirements
-
-- **OS**: Windows 10 1803+ / Windows 11
-- **Runtime**: WebView2 Runtime (built-in for Windows 10 1803+)
-- **Memory**: Minimum 2GB RAM, recommended 4GB RAM
-- **Disk**: Minimum 100MB free space
-
-### Installation
-
-#### Method 1: Using Release Package (Recommended)
-
-1. Download the latest `crac_exam-windows-amd64.zip`
-2. Extract to any directory (recommended: `D:\Programs\crac_exam\`)
-3. Double-click `crac_exam.exe` to run
-
-#### Method 2: Build from Source
-
-**Prerequisites**:
-
+### 环境
 - Go 1.26+
 - Node.js 18+
-- Wails CLI
+- Wails3 CLI（本机已安装 `wails3 v3.1.0`）
+- Windows 10/11 + WebView2
 
+### 开发模式
 ```bash
-# 1. Clone the repository
-git clone https://github.com/dracula-zz-1/crac_exam_go.git
-cd crac_exam_go
+cd D:\crac_new\crac_exam_v3
+wails3 dev
+```
 
-# 2. Install Wails CLI
-go install github.com/wailsapp/wails/v2/cmd/wails@latest
-
-# 3. Install frontend dependencies
+### 只预览前端（浏览器演示数据）
+```bash
 cd frontend
 npm install
-cd ..
-
-# 4. Run in development mode
-wails dev
-
-# 5. Build for production
-wails build -platform windows/amd64 -trimpath -ldflags "-s -w -extldflags '-static'"
+npm run dev
 ```
 
-### Usage
-
-#### First Time Setup
-
-1. **Import Question Bank**
-   - Go to "Settings" page
-   - Drag and drop CRAC official PDF question bank into the import area
-   - Wait for import to complete (about 1-2 minutes)
-   - Check import statistics to verify question count
-2. **Start Learning**
-   - Return to homepage, select category (A/B/C)
-   - Click "Question-by-Question Practice" to start
-   - Or click "Mock Exam" for full simulation
-
-#### Feature Usage
-
-##### Question Bank Management
-
-- **Search**: Search by question ID, stem, answer keywords
-- **Filter**: Filter by A/B/C class
-- **View**: Click question to view details including images
-- **Delete**: Support single and batch delete
-
-##### Online Practice
-
-- **Select Category**: Choose A/B/C category on homepage
-- **Practice**: System randomly selects questions, shows results immediately
-- **Auto Collect Errors**: Wrong answers automatically added to error book
-- **Favorite**: Click star to bookmark important questions
-
-##### Mock Exam
-
-- **Select Category**: Choose corresponding exam category
-- **Start Exam**: System generates paper according to real exam rules
-- **Answer Interface**: Shows question number, stem, options, remaining time
-- **Submit & Score**: Shows score immediately after time expires or manual submit
-
-##### Error Book
-
-- **Auto Collection**: Errors from practice and exams automatically added
-- **Category View**: View errors by A/B/C class separately
-- **Error Practice**: Targeted practice on error questions
-- **Remove**: Manually remove mastered questions
-
-##### Favorites
-
-- **Add**: Click favorite button in question details
-- **Category Management**: View favorites by category
-- **Favorite Practice**: Practice on favorited questions
-
-##### Statistics
-
-- **Score Trend**: Line chart showing exam score changes
-- **Time Filter**: Supports 7 days/half year/year/all time range
-- **Category Stats**: View A/B/C class statistics separately
-- **Detailed Data**: Exam count, pass rate, average score, etc.
-
-### Data Storage
-
-All data is stored in the `.crac_exam` folder under user directory:
-
+### 生产构建
+```bash
+wails3 build
 ```
-C:\Users\Username\.crac_exam\
-├── data\
-│   └── exam_questions.db    # SQLite database file
-└── logs\
-    └── backend.log          # Application log file
+产物：`bin/crac-exam-v3.exe`
+
+### 测试
+```bash
+go test ./backend/...
+npm --prefix frontend run build   # vue-tsc + vite build
 ```
 
-**Advantages**:
+---
 
-- Separated from program, data survives reinstallation
-- Multi-user sharing program with independent data
-- Easy cleanup, delete folder to clear all data
+## 📁 数据位置
 
-## 🛠️ Development Guide
+默认：
 
-### Environment Setup
+```
+%APPDATA%\CracExamV3\
+├── crac_exam.db
+├── crac_exam.db-wal
+├── crac_exam.db-shm
+├── logs\app.log
+├── temp\            # 导入时的临时解压目录，自动清理
+└── updates\         # 从 GitHub Release 下载的应用更新包
+```
 
-#### 1. Install Go
+可用环境变量覆盖（便携部署/测试）：
 
 ```bash
-# Download and install Go 1.26+
-# https://golang.org/dl/
-
-# Verify installation
-go version
+set CRAC_EXAM_DATA_DIR=D:\CracExamData
 ```
 
-#### 2. Install Node.js
+> 本版使用新的数据库结构，不会自动迁移旧版 `~/.crac_exam` 或旧目录中的数据。如需保留旧成绩，请先在旧版导出或重新导入题库。
+
+---
+
+## 🔄 应用在线更新
+
+设置页「应用更新」会读取 GitHub 仓库 `dracula-zz-1/crac_exam_go` 的最新 Release：
+
+1. 点击「检查更新」，与当前 `config.AppVersion` 比较版本号（支持 `v3.1.0` 形式）。
+2. 若 Release 中有 Windows 安装包，点击「下载更新」保存到 `updates\`。
+3. 下载完成后点击「运行安装」，应用启动安装程序；不会自动运行，也不会删除本地题库与学习数据。
+
+Release 需满足：
+
+- 已发布（不是草稿），标签版本高于当前版本；
+- 附件包含 `.exe` 或 `.msi`，文件名建议带 `windows` 与 `amd64`，例如 `crac-exam-v3.1.0-windows-amd64.exe`；
+- 若 GitHub API 返回附件的 `digest` 字段，应用下载后会进行 SHA-256 校验。
+
+更新源可通过设置接口 `SetRepo`、`app.github_repo` 元数据或 `CRAC_EXAM_GITHUB_REPO` 环境变量覆盖。GitHub API 有速率限制时，可设置 `GITHUB_TOKEN` 环境变量提高额度。
+
+### 发布新版本
+
+仓库包含 [.github/workflows/release.yml](.github/workflows/release.yml)：推送 `v*` 标签时，会在 `windows-latest` 上构建并自动发布 GitHub Release：
 
 ```bash
-# Download and install Node.js 18+
-# https://nodejs.org/
-
-# Verify installation
-node --version
-npm --version
+git tag v3.1.0
+git push origin v3.1.0
 ```
 
-#### 3. Install Wails CLI
+工作流会：
+
+- 将标签版本注入应用版本（`backend/config/config.go` 的 `AppVersion`）和 Windows 文件属性；
+- 构建便携版 `crac-exam-v3.1.0-windows-amd64.exe`；
+- 若 NSIS 可用，同时生成安装器 `crac-exam-v3.1.0-windows-amd64-installer.exe`（应用内更新优先选择安装器）；
+- 生成 SHA-256 文件并附加到 Release。
+
+也可以在 GitHub Actions 页面手动触发 `Release Windows` 并填写已存在的标签。
+
+---
+
+## 📦 题库 ZIP 说明
+
+1. 把以下 5 份 PDF 放进一个 ZIP（可放在子目录）：
+   - 总题库.pdf
+   - 总题库附图标记.pdf
+   - A类题库.pdf
+   - B类题库.pdf
+   - C类题库.pdf
+2. 在「设置 → 导入题库」点击选择，或直接把 ZIP 拖进窗口。
+3. 确认后会显示解析/写库进度。
+4. 导入是**原子替换**：会清空旧题库、错题本、收藏和练习进度；已交卷的考试复盘快照保留。
+5. 导入完成后会给出统计与警告（例如重复题号、图片数量不匹配等）。
+
+### 真实题库验证（2025-08-09 版 ZIP）
+
+已用 `D:\crac_new\crac_exam_old\resources\data\20250809124154_2851.zip` 实测：
+
+- 1375 题：单选 1123、多选 252
+- A / B / C 分类：683 / 1143 / 1282（同题可属于多类）
+- 带图题 53 道；图片按 J 映射，与旧版数据逐题尺寸一致（新实现输出 JPEG，旧版输出 PNG）
+- **J/P/I 联合键 1375 个全部唯一**，`duplicateJPI = 0`
+- 与旧版数据库对比：J、P、T、题型、图片有无 **完全一致**
+- 题干/选项差异主要来自：旧解析把页码混入正文、旧逻辑误删行尾数字；本版已修正
+- 真实数据跑通 A/B/C 三场考试：40 / 60 / 90 题，全对均为满分并通过
+
+回归命令：
 
 ```bash
-go install github.com/wailsapp/wails/v2/cmd/wails@latest
+set CRAC_TEST_ZIP=D:\crac_new\crac_exam_old\resources\data\20250809124154_2851.zip
+go test ./backend/importer -run TestRealBankZipIfProvided -v
 ```
 
-#### 4. Install Project Dependencies
+也可以不启动 GUI，直接验证导入与 statistics/考试流程：
 
 ```bash
-# Backend dependencies
-go mod tidy
-
-# Frontend dependencies
-cd frontend
-npm install
+go run ./tools/verifyimport D:\path\to\题库.zip
 ```
 
-### Development Commands
+### 题目唯一键：J + P + I
 
-```bash
-# Development mode (with hot reload)
-wails dev
+- 数据库内部保留自增 `id` 作为引用键：考试题目详情、错题本、收藏夹都引用它，避免题目信息修改后引用失效。
+- `(J, P, I)` 作为题目的**自然联合唯一键**，通过 `idx_questions_jpi` 唯一索引约束。
+- 导入时按 `(J, P, I)` 去重：重复项只保留第一条，并在结果里返回 `duplicateJpi` 与警告。
+- 题库编辑时校验联合键冲突，提示“题号（J/P/I 联合）已被其他题目使用”。
+- 旧数据库如果存在联合键重复，唯一索引创建会失败并记录警告；应用仍可启动，导入/编辑路径仍会主动去重/校验。
+- 单独的 `J` 允许重复（例如题库中的 `LX`），不影响题目身份。
 
-# Production build
-wails build
+### 纯 Go PDF 解析的边界
+- 文本提取依赖 PDF 的字体编码与 `ToUnicode` 映射；若官方题库更新后使用了非常规编码，可能出现乱码/缺字段，导入结果会给出警告。
+- 该题库的 PDF 会把行内数字/英文拆成独立文本对象。本版按页首精确剔除页码，并在中文↔ASCII 边界补空格，避免 `RMKS IS → RMKSIS`、`50Ω → Ω` 这类问题。
+- 图片按“附图标记 PDF 的文本顺序 ↔ 图片对象顺序”匹配，并对 `LK060 → LK0603` 做兼容映射。
+- 浏览器无法直接显示的图片格式（jpx/jbig2）会被跳过并计入警告。
+- 超过 600MB 的 ZIP、单文件超过 512MB、解压总量超过 1.5GB 会被拒绝。
+- ZIP 中的 `__MACOSX/` 与 `._` 资源叉文件会自动忽略。
 
-# Build Windows 64-bit version
-wails build -platform windows/amd64
+---
 
-# Build with debug info
-wails build -debug
+## 🗂 目录结构
 
-# Clean build cache
-wails build -clean
+```
+crac_exam_v3/
+├── main.go                     # Wails3 应用入口、服务注册、窗口与拖放
+├── backend/
+│   ├── config/                 # 数据目录、考试配置
+│   ├── models/                 # JSON 模型（Question/Exam/Dashboard…）
+│   ├── store/                  # SQLite 打开、建表、事务化查询
+│   ├── services/               # Wails 绑定服务
+│   │   ├── user_service.go
+│   │   ├── question_service.go
+│   │   ├── exam_service.go     # 服务端计时、判分、幂等交卷
+│   │   ├── practice_service.go # 练习/错题/收藏、一次取数
+│   │   ├── statistics_service.go
+│   │   ├── settings_service.go
+│   │   └── import_service.go   # ZIP 导入、事务替换、进度事件
+│   ├── importer/               # 纯 Go ZIP/PDF 解析
+│   │   ├── zip.go
+│   │   ├── pdf.go
+│   │   ├── parse.go
+│   │   └── *_test.go
+│   └── utils/                  # slog + 轮转日志
+├── tools/
+│   ├── importbank/             # 命令行导入题库到默认数据目录
+│   ├── verifybank/             # 题库完整性校验（数量/唯一键/分类/图片/源字段）
+│   ├── verifyimport/           # 命令行导入 + 真实数据流程验证
+│   ├── dumptext/               # 导出 PDF 文本用于排查解析问题
+│   └── genicon/                # 生成应用图标
+├── frontend/
+│   ├── src/
+│   │   ├── api/                # 真实 Wails 绑定 + 浏览器 mock
+│   │   ├── components/         # AppShell/图标/图表/弹窗/选项…
+│   │   ├── stores/             # session / bank 缓存 / toast
+│   │   ├── views/              # 9 个页面
+│   │   ├── styles/main.css     # 设计系统
+│   │   └── types.ts
+│   └── bindings/               # wails3 自动生成，勿手改
+├── build/                      # 图标、清单、打包配置
+├── bin/                        # 构建产物
+└── Taskfile.yml
 ```
 
-### Database Schema
+---
 
-#### Main Tables
+## ✅ 测试覆盖
 
-**questions**
+- 题库完整性工具 `go run ./tools/verifybank <zip>`：
+  - 数量、J/P/I 联合唯一、字段完整性、题型/答案一致性
+  - A/B/C 与分类 PDF 逐题比对
+  - 图片解码/数量/题号
+  - 每个 Q/T/A-D 与原始 PDF 标记位置逐字段比对
+- 导入器：
+  - 标记解析、`J]` 变体、缺字段跳过
+  - 按页剔除页码；保留行内数字（`50Ω`、`200`、`1、0、0、0`）
+  - 中英文文本对象合并时的智能空格
+  - 分类 `[I]` 提取
+  - 生成的 ZIP + 5 份 PDF 端到端解析（含中文题干、图片、分类、重复题号警告）
+  - **真实 2025-08-09 题库 ZIP** 回归（通过 `CRAC_TEST_ZIP` 启用）
+  - 非 ZIP / 缺文件 / macOS 资源叉文件拒绝或忽略
+- 服务层：
+  - 登录建档与幂等
+  - 开考（题量不足拒绝）、服务端计时、全对/全错交卷、幂等重复交卷
+  - 弃考清理、错题去重
+  - 练习进度 upsert、收藏/错题增删、题目删除清理引用
+  - 题库分页 OR 语义、搜索
+  - 清空题库保留已交卷快照、清空用户数据
+  - 导入事务替换语义与失败保留旧题库
+- 前端：`vue-tsc` 严格类型检查 + Vite 生产构建
+- 手工 GUI 走查：登录、总览、练习、考试、交卷、结果复盘、错题本、题库管理、导入进度与结果
 
-```sql
-CREATE TABLE questions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    J TEXT,          -- Question ID
-    P TEXT,          -- Category
-    I TEXT,          -- Unique identifier
-    Q TEXT,          -- Question stem
-    T TEXT,          -- Correct answer
-    A TEXT,          -- Option A
-    B TEXT,          -- Option B
-    C TEXT,          -- Option C
-    D TEXT,          -- Option D
-    F TEXT,          -- Explanation
-    LA INTEGER,      -- Class A flag
-    LB INTEGER,      -- Class B flag
-    LC INTEGER,      -- Class C flag
-    type INTEGER,    -- Question type (1=single, 2=multiple)
-    user_id INTEGER, -- User ID
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-```
+---
 
-**exam\_records**
+## ⚠️ 已知限制
 
-```sql
-CREATE TABLE exam_records (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER,
-    category TEXT,
-    exam_date DATETIME,
-    total_questions INTEGER,
-    correct_count INTEGER,
-    score REAL,
-    duration_seconds INTEGER,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-```
+- 本项目定位为**本地模拟练习**，不是官方考试系统；“身份证号”仅作为本地档案标识，不做联网校验。
+- 纯 Go PDF 解析对极端排版的 PDF 可能不如 PyMuPDF 稳健；如果官方题库更新后解析异常，请把 ZIP 和导入警告一起反馈。
+- 考试时长由服务端基于开考时间计算；若运行中系统时间被大幅调整，时长会随之变化。
+- 数据库结构变更未做自动迁移；升级前建议导出/备份数据目录。
+- 目前只针对 Windows 构建做了验证。
 
-**error\_questions**
+---
 
-```sql
-CREATE TABLE error_questions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER,
-    question_id INTEGER,
-    category TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (question_id) REFERENCES questions(id)
-);
-```
+## 致谢
 
-**favorite\_questions**
+- [Wails](https://v3.wails.io/) — Go 桌面应用框架
+- [ledongthuc/pdf](https://github.com/ledongthuc/pdf)、[pdfcpu](https://github.com/pdfcpu/pdfcpu) — 纯 Go PDF 解析
+- CRAC 业余无线电题库的整理者与旧版作者 BA4RHH
 
-```sql
-CREATE TABLE favorite_questions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER,
-    question_id INTEGER,
-    category TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (question_id) REFERENCES questions(id)
-);
-```
-
-### API Calls
-
-Frontend calls backend Go methods through Wails Runtime:
-
-```typescript
-// Import services
-import { PracticeService, ExamService } from '../wailsjs/go/services'
-
-// Call Go method
-const questions = await PracticeService.GetQuestionsByCategory(1, 'A')
-
-// Handle errors
-try {
-  const result = await ExamService.CreateExam(userID, category)
-} catch (error) {
-  console.error('Exam creation failed:', error)
-}
-```
-
-### Adding New Features
-
-#### 1. Add Backend Service
-
-```go
-// backend/services/new_service.go
-package services
-
-type NewService struct {
-    // Dependencies
-}
-
-func (s *NewService) DoSomething(param string) (string, error) {
-    // Business logic
-    return "result", nil
-}
-```
-
-#### 2. Register Service
-
-```go
-// main.go
-err := wails.Run(&options.App{
-    // ...
-    Bind: []interface{}{
-        &services.NewService{},
-        // ...
-    },
-})
-```
-
-#### 3. Frontend Call
-
-```typescript
-// frontend/src/api/NewService.ts
-import { NewService as GoNewService } from '../wailsjs/go/services'
-
-export const NewService = {
-  DoSomething: async (param: string): Promise<string> => {
-    return await GoNewService.DoSomething(param)
-  },
-}
-```
-
-## ❓ FAQ
-
-### Q1: Program won't start, missing WebView2
-
-**Solution**:
-
-1. Windows 10 1803+ has WebView2 built-in, please update your system
-2. Or manually install WebView2 Runtime:
-   - Download: <https://developer.microsoft.com/zh-cn/microsoft-edge/webview2/>
-   - Select "Fixed Version" for x64 architecture
-
-### Q2: PDF import fails or questions incomplete
-
-**Solution**:
-
-1. Ensure PDF file is in CRAC official format
-2. Check if PDF file is corrupted
-3. Check log file: `C:\Users\Username\.crac_exam\logs\backend.log`
-4. Try re-downloading PDF question bank
-
-### Q3: Images don't display during exam
-
-**Solution**:
-
-1. Check if images were successfully extracted during import
-2. Check if `images` table in database has image data
-3. Re-import question bank, ensure image extraction succeeds
-
-### Q4: Data loss or corruption
-
-**Solution**:
-
-1. Check if data file exists: `C:\Users\Username\.crac_exam\data\exam_questions.db`
-2. Restore from backup if available
-3. Re-import question bank
-
-### Q5: Program runs slowly
-
-**Solution**:
-
-1. Close other resource-intensive programs
-2. Clean up unused data in database
-3. Check if system has sufficient memory
-4. Try restarting the program
-
-### Q6: How to clear all data
-
-**Solution**:
-
-1. Close the program
-2. Delete folder: `C:\Users\Username\.crac_exam\`
-3. Restart program, it will create new data files automatically
-
-## 📝 Changelog
-
-### v1.0.0 (2026-04-16)
-
-**New Features**
-
-- ✅ Complete A/B/C class question management
-- ✅ Question-by-question practice and mock exam
-- ✅ Error book and favorites functionality
-- ✅ Exam score statistics charts
-- ✅ One-click PDF question bank import
-- ✅ Automatic question image extraction
-
-**Improvements**
-
-- ✅ Data storage in user directory, separated from program
-- ✅ Single file package with all CGO dependencies
-- ✅ Application icon and UI optimization
-- ✅ Auto prompt and return to home when no data
-
-**Bug Fixes**
-
-- ✅ Fixed multiple-choice answer marking issue
-- ✅ Fixed error book data loading error
-- ✅ Fixed chart single data point display issue
-- ✅ Fixed PDF parsing stem truncation issue
-
-## 📄 License
-
-This project is licensed under the MIT License. See [LICENSE](LICENSE) file for details.
-
-## 🤝 Contributing
-
-Issues and Pull Requests are welcome!
-
-1. Fork this project
-2. Create a feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
-## 🙏 Acknowledgments
-
-Thanks to the following open source projects:
-
-- [Wails](https://wails.io/) - Modern Go desktop application framework
-- [Vue.js](https://vuejs.org/) - Progressive JavaScript framework
-- [Element Plus](https://element-plus.org/) - Vue 3 component library
-- [ECharts](https://echarts.apache.org/) - Powerful data visualization library
-- [go-fitz](https://github.com/gen2brain/go-fitz) - Go PDF processing library
-- [unipdf](https://github.com/oliverpool/unipdf) - Go PDF processing library
-
-***
-
-**Wish all candidates success in the exam and obtain amateur radio operator certificate soon!** 🎉
+Copyright © 2024-2026 BA4RHH

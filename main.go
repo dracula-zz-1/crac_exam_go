@@ -1,70 +1,94 @@
 package main
 
 import (
-	"context"
-	"crac_exam_go/backend/dao"
-	"crac_exam_go/backend/services"
 	"embed"
-	"log"
+	"os"
 
-	"github.com/wailsapp/wails/v2"
-	"github.com/wailsapp/wails/v2/pkg/options"
-	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
+
+	"crac_exam_v3/backend/config"
+	"crac_exam_v3/backend/models"
+	"crac_exam_v3/backend/services"
+	"crac_exam_v3/backend/store"
+	"crac_exam_v3/backend/utils"
 )
 
 //go:embed all:frontend/dist
 var assets embed.FS
 
 func main() {
-	// 初始化数据库
-	db, err := dao.GetDB()
+	utils.Init(config.LogDir())
+	utils.Info("main", "应用启动", "version", config.AppVersion, "data_dir", config.DataDir())
+
+	db, err := store.Open(config.DBPath())
 	if err != nil {
-		log.Fatal("数据库初始化失败:", err)
+		utils.Error("main", "数据库初始化失败", err)
+		os.Exit(1)
 	}
+	defer db.Close()
 
-	// 创建数据库表
-	if err := dao.InitDatabase(); err != nil {
-		log.Fatal("数据库表创建失败:", err)
-	}
+	// 上次运行遗留的“进行中”考试不计入成绩
+	store.CleanupAbandonedExams(db)
 
-	// 设置全局数据库实例供 services 使用
-	services.SetDB(db)
+	application.RegisterEvent[models.ImportProgress]("import:progress")
+	application.RegisterEvent[models.BankUpdateStatus]("bank:update-status")
+	application.RegisterEvent[models.AppUpdateStatus]("app:update-status")
+	application.RegisterEvent[models.AppUpdateProgress]("app:update-progress")
+	application.RegisterEvent[[]string]("files-dropped")
 
-	// 创建服务实例
-	importService := services.NewImportService(db)
-
-	// 创建应用实例
-	err = wails.Run(&options.App{
-		Title:         "业余无线电模拟考试系统",
-		Width:         1024,
-		Height:        768,
-		DisableResize: true,
-		AssetServer: &assetserver.Options{
-			Assets: assets,
+	app := application.New(application.Options{
+		Name:        config.AppName,
+		Description: config.AppDesc,
+		Services: []application.Service{
+			application.NewService(services.NewUserService(db)),
+			application.NewService(services.NewQuestionService(db)),
+			application.NewService(services.NewExamService(db)),
+			application.NewService(services.NewPracticeService(db)),
+			application.NewService(services.NewStatisticsService(db)),
+			application.NewService(services.NewSettingsService(db)),
+			application.NewService(services.NewImportService(db)),
+			application.NewService(services.NewUpdateService(db)),
+			application.NewService(services.NewAppUpdateService(db)),
 		},
-		BackgroundColour: &options.RGBA{R: 255, G: 255, B: 255, A: 255},
-		OnStartup: func(ctx context.Context) {
-			importService.SetContext(ctx)
+		Assets: application.AssetOptions{
+			Handler: application.AssetFileServerFS(assets),
 		},
-		OnShutdown: func(ctx context.Context) {
-			// 关闭数据库连接
-			if err := dao.CloseDB(); err != nil {
-				log.Println("关闭数据库连接失败:", err)
-			}
+		ErrorHandler: func(err error) {
+			utils.Error("application", "未处理错误", err)
 		},
-		Bind: []interface{}{
-			services.NewUserService(db),
-			services.NewSettingsService(db),
-			services.NewQuestionsBankService(db),
-			services.NewExamService(db),
-			services.NewPracticeService(db),
-			services.NewFavoriteService(db),
-			services.NewStatisticsService(db),
-			importService,
+		PanicHandler: func(details *application.PanicDetails) {
+			utils.Error("application", "捕获到未处理的 panic", details.Error, "stack", details.FullStackTrace)
+		},
+		OnShutdown: func() {
+			_ = db.Close()
+		},
+		Mac: application.MacOptions{
+			ApplicationShouldTerminateAfterLastWindowClosed: true,
 		},
 	})
 
-	if err != nil {
-		println("Error:", err.Error())
+	win := app.Window.NewWithOptions(application.WebviewWindowOptions{
+		Title:            config.AppName,
+		Width:            1280,
+		Height:           840,
+		MinWidth:         1100,
+		MinHeight:        720,
+		BackgroundColour: application.NewRGB(247, 245, 240),
+		URL:              "/",
+		EnableFileDrop:   true,
+	})
+
+	// 原生拖拽文件（只处理路径，真正导入由前端确认）
+	win.OnWindowEvent(events.Common.WindowFilesDropped, func(event *application.WindowEvent) {
+		files := event.Context().DroppedFiles()
+		if len(files) > 0 {
+			app.Event.Emit("files-dropped", files)
+		}
+	})
+
+	if err := app.Run(); err != nil {
+		utils.Error("main", "应用退出", err)
+		os.Exit(1)
 	}
 }

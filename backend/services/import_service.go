@@ -1,606 +1,148 @@
 package services
 
 import (
-	"context"
-	"crac_exam_go/backend/dao"
-	"crac_exam_go/backend/models"
-	"crac_exam_go/backend/utils"
-	"encoding/base64"
-	"encoding/json"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
-	"github.com/wailsapp/wails/v2/pkg/runtime"
-	"gorm.io/gorm"
+	"crac_exam_v3/backend/importer"
+	"crac_exam_v3/backend/models"
+	"crac_exam_v3/backend/store"
+	"crac_exam_v3/backend/utils"
+
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
-// ImportService 导入服务
 type ImportService struct {
-	questionDAO *dao.QuestionDAO
-	db          *gorm.DB
-	ctx         context.Context
+	db *sql.DB
+	mu sync.Mutex
 }
 
-// ImportResult 导入结果
-type ImportResult struct {
-	Success       bool           `json:"success"`
-	Message       string         `json:"message"`
-	ImportedCount int            `json:"imported_count"`
-	TotalCount    int            `json:"total_count"`
-	Stats         map[string]int `json:"stats"`
+func NewImportService(db *sql.DB) *ImportService {
+	return &ImportService{db: db}
 }
 
-// NewImportService 创建 ImportService 实例
-func NewImportService(db *gorm.DB) *ImportService {
-	return &ImportService{
-		questionDAO: dao.NewQuestionDAO(db),
-		db:          db,
-		ctx:         nil,
+func (s *ImportService) ServiceName() string { return "ImportService" }
+
+// PickZipFile 打开系统文件选择框，只允许 ZIP。
+func (s *ImportService) PickZipFile() (string, error) {
+	app := application.Get()
+	if app == nil {
+		return "", fmt.Errorf("应用尚未就绪")
 	}
+	path, err := app.Dialog.OpenFile().
+		SetTitle("选择题库压缩包（ZIP）").
+		AddFilter("题库压缩包 (*.zip)", "*.zip").
+		PromptForSingleSelection()
+	if err != nil {
+		return "", fmt.Errorf("打开文件选择框失败：%w", err)
+	}
+	return path, nil
 }
 
-// SetContext 设置 Wails 上下文（用于事件推送）
-func (s *ImportService) SetContext(ctx context.Context) {
-	s.ctx = ctx
+// ImportZip 解析并原子替换题库。只有 ZIP 中的 PDF 会被读取。
+func (s *ImportService) ImportZip(zipPath string) (*models.ImportResult, error) {
+	zipPath = strings.TrimSpace(zipPath)
+	if zipPath == "" {
+		return nil, fmt.Errorf("未选择文件")
+	}
+
+	// 同一时间只允许一个导入任务
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	utils.Info("ImportService", "开始导入题库", "path", zipPath)
+	emitProgress(models.ImportProgress{Stage: "start", Message: "开始导入…", Percent: 1})
+
+	questions, result, err := importer.ImportZip(zipPath, emitProgress)
+	if err != nil {
+		utils.Error("ImportService", "解析题库失败", err)
+		return nil, err
+	}
+
+	emitProgress(models.ImportProgress{Stage: "write", Message: "正在写入数据库…", Percent: 90})
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("开启事务失败：%w", err)
+	}
+	defer tx.Rollback()
+
+	// 先按 J/P/I 快照用户数据，再替换题库，最后映射回新题目。
+	refs, err := store.SnapshotImportRefs(tx)
+	if err != nil {
+		return nil, fmt.Errorf("读取用户数据失败：%w", err)
+	}
+	if err := store.RemoveAllQuestionsForImport(tx); err != nil {
+		return nil, fmt.Errorf("清理旧题库失败：%w", err)
+	}
+	if err := store.InsertQuestions(tx, questions); err != nil {
+		return nil, fmt.Errorf("写入题库失败：%w", err)
+	}
+	fav, errs, prog, err := store.RestoreImportRefs(tx, refs)
+	if err != nil {
+		return nil, fmt.Errorf("恢复用户数据失败：%w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("提交题库失败：%w", err)
+	}
+
+	result.PreservedFavorites = fav
+	result.PreservedErrors = errs
+	result.PreservedProgress = prog
+	result.Message = fmt.Sprintf("成功导入 %d 道题目", len(questions))
+	result.Imported = len(questions)
+
+	// 记录本次导入来源，供自动更新比对。手动导入先清空远程来源信息，
+	// 自动更新流程在导入成功后会回填 URL/ETag/Last-Modified。
+	if hash, size, err := fileSHA256Size(zipPath); err == nil {
+		now := time.Now()
+		values := map[string]string{
+			store.MetaBankSHA256:       hash,
+			store.MetaBankSize:         strconv.FormatInt(size, 10),
+			store.MetaBankSourceName:   filepath.Base(zipPath),
+			store.MetaBankSourceURL:    "",
+			store.MetaBankETag:         "",
+			store.MetaBankLastModified: "",
+			store.MetaBankImportedAt:   strconv.FormatInt(now.UnixMilli(), 10),
+			store.MetaBankVersion:      filepath.Base(zipPath),
+		}
+		if err := store.SetMetas(s.db, values); err != nil {
+			utils.Warn("ImportService", "写入题库来源信息失败", "error", err.Error())
+		}
+	}
+
+	emitProgress(models.ImportProgress{Stage: "done", Message: result.Message, Percent: 100})
+	utils.Info("ImportService", "题库导入完成", "count", len(questions), "elapsed_ms", result.ElapsedMS,
+		"preserved_favorites", fav, "preserved_errors", errs, "preserved_progress", prog)
+	return result, nil
 }
 
-// emitProgress 发送导入进度事件到前端
-func (s *ImportService) emitProgress(percent int, message string) {
-	if s.ctx == nil {
+func fileSHA256Size(path string) (string, int64, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", 0, err
+	}
+	defer f.Close()
+	h := sha256.New()
+	n, err := io.Copy(h, f)
+	if err != nil {
+		return "", 0, err
+	}
+	return hex.EncodeToString(h.Sum(nil)), n, nil
+}
+
+func emitProgress(p models.ImportProgress) {
+	app := application.Get()
+	if app == nil {
 		return
 	}
-	runtime.EventsEmit(s.ctx, "import-progress", map[string]interface{}{
-		"percent": percent,
-		"message": message,
-	})
-}
-
-// ResetDatabase 重置数据库
-func (s *ImportService) ResetDatabase() (bool, error) {
-	s.emitProgress(5, "正在清空旧题库...")
-	utils.Info("ImportService", "开始重置数据库", nil)
-
-	// 清空题库表
-	err := s.questionDAO.ResetTable()
-	if err != nil {
-		utils.Error("ImportService", "重置数据库失败", err, nil)
-		return false, err
-	}
-
-	utils.Info("ImportService", "数据库重置完成", nil)
-	return true, nil
-}
-
-// ImportQuestions 导入题目到数据库
-func (s *ImportService) ImportQuestions(questions []*models.Question) (*ImportResult, error) {
-	utils.Info("ImportService", "开始导入题目", map[string]interface{}{
-		"total": len(questions),
-	})
-
-	total := len(questions)
-	if total == 0 {
-		utils.Error("ImportService", "没有题目数据可导入", nil, nil)
-		return &ImportResult{
-			Success:       false,
-			Message:       "题库文件为空",
-			ImportedCount: 0,
-			TotalCount:    0,
-			Stats:         make(map[string]int),
-		}, nil
-	}
-
-	// 重置数据库
-	s.emitProgress(15, "正在准备导入数据...")
-	success, err := s.ResetDatabase()
-	if err != nil || !success {
-		utils.Error("ImportService", "重置数据库失败", err, nil)
-		s.emitProgress(0, "重置题库失败")
-		return &ImportResult{
-			Success:       false,
-			Message:       "重置题库表失败",
-			ImportedCount: 0,
-			TotalCount:    0,
-			Stats:         make(map[string]int),
-		}, err
-	}
-
-	// 批量插入题目
-	s.emitProgress(30, fmt.Sprintf("正在导入题目数据（共 %d 道）...", total))
-	err = s.questionDAO.BatchInsert(questions)
-	if err != nil {
-		utils.Error("ImportService", "批量插入题目失败", err, nil)
-		s.emitProgress(0, "导入失败")
-		return &ImportResult{
-			Success:       false,
-			Message:       "批量插入题目失败",
-			ImportedCount: 0,
-			TotalCount:    0,
-			Stats:         make(map[string]int),
-		}, err
-	}
-
-	s.emitProgress(90, "正在生成统计数据...")
-
-	// 统计信息
-	stats := calculateImportStats(questions)
-
-	// 将 map[string]int 转换为 map[string]interface{} 以适配 logrus.Fields
-	statsInterface := make(map[string]interface{})
-	for k, v := range stats {
-		statsInterface[k] = v
-	}
-	utils.Info("ImportService", "统计信息", statsInterface)
-
-	s.emitProgress(100, "导入完成！")
-
-	return &ImportResult{
-		Success:       true,
-		Message:       "导入成功",
-		ImportedCount: total,
-		TotalCount:    total,
-		Stats:         stats,
-	}, nil
-}
-
-// calculateImportStats 计算导入统计信息
-func calculateImportStats(questions []*models.Question) map[string]int {
-	stats := make(map[string]int)
-
-	// 总计
-	stats["total"] = len(questions)
-
-	// A 类统计
-	aTotal := 0
-	aSingle := 0
-	aMultiple := 0
-	aWithImage := 0
-	// B 类统计
-	bTotal := 0
-	bSingle := 0
-	bMultiple := 0
-	bWithImage := 0
-	// C 类统计
-	cTotal := 0
-	cSingle := 0
-	cMultiple := 0
-	cWithImage := 0
-
-	for _, q := range questions {
-		isSingle := len(q.T) == 1
-		isMultiple := len(q.T) > 1
-		hasImage := q.F != ""
-
-		// A 类
-		if q.LA == 1 {
-			aTotal++
-			if isSingle {
-				aSingle++
-			}
-			if isMultiple {
-				aMultiple++
-			}
-			if hasImage {
-				aWithImage++
-			}
-		}
-
-		// B 类
-		if q.LB == 1 {
-			bTotal++
-			if isSingle {
-				bSingle++
-			}
-			if isMultiple {
-				bMultiple++
-			}
-			if hasImage {
-				bWithImage++
-			}
-		}
-
-		// C 类
-		if q.LC == 1 {
-			cTotal++
-			if isSingle {
-				cSingle++
-			}
-			if isMultiple {
-				cMultiple++
-			}
-			if hasImage {
-				cWithImage++
-			}
-		}
-	}
-
-	stats["a_total"] = aTotal
-	stats["a_single"] = aSingle
-	stats["a_multiple"] = aMultiple
-	stats["a_with_image"] = aWithImage
-
-	stats["b_total"] = bTotal
-	stats["b_single"] = bSingle
-	stats["b_multiple"] = bMultiple
-	stats["b_with_image"] = bWithImage
-
-	stats["c_total"] = cTotal
-	stats["c_single"] = cSingle
-	stats["c_multiple"] = cMultiple
-	stats["c_with_image"] = cWithImage
-
-	return stats
-}
-
-// ProcessUnifiedData 根据文件类型自动处理数据并导入数据库（通过文件路径）
-func (s *ImportService) ProcessUnifiedData(filePath string) (*ImportResult, error) {
-	utils.Info("ImportService", "开始处理文件", map[string]interface{}{
-		"file_path": filePath,
-	})
-
-	s.emitProgress(2, "正在读取文件...")
-
-	// 验证文件大小
-	fileInfo, err := os.Stat(filePath)
-	if err != nil {
-		utils.Error("ImportService", "获取文件信息失败", err, nil)
-		return nil, fmt.Errorf("获取文件信息失败：%v", err)
-	}
-	if fileInfo.Size() > 100*1024*1024 { // 100MB限制
-		utils.Warn("ImportService", "文件过大", map[string]interface{}{
-			"size": fileInfo.Size(),
-		})
-		s.emitProgress(0, "文件过大")
-		return &ImportResult{
-			Success:       false,
-			Message:       "文件过大，最大支持 100MB",
-			ImportedCount: 0,
-			TotalCount:    0,
-			Stats:         make(map[string]int),
-		}, nil
-	}
-
-	// 获取文件扩展名
-	fileExt := strings.ToLower(filepath.Ext(filePath))
-
-	// 文件类型白名单验证
-	validExts := map[string]bool{
-		".json": true,
-		".xlsx": true,
-		".xls":  true,
-		".csv":  true,
-		".zip":  true,
-	}
-
-	if !validExts[fileExt] {
-		utils.Warn("ImportService", "不支持的文件类型", map[string]interface{}{
-			"extension": fileExt,
-		})
-		return &ImportResult{
-			Success:       false,
-			Message:       fmt.Sprintf("不支持的文件类型：%s", fileExt),
-			ImportedCount: 0,
-			TotalCount:    0,
-			Stats:         make(map[string]int),
-		}, nil
-	}
-
-	utils.Debug("ImportService", "文件类型", map[string]interface{}{
-		"extension": fileExt,
-	})
-
-	// 根据文件类型选择对应的处理方法
-	switch fileExt {
-	case ".json":
-		return s.processJSONData(filePath)
-	case ".xlsx", ".xls":
-		return s.processExcelData(filePath)
-	case ".csv":
-		return s.processCSVData(filePath)
-	case ".zip":
-		return s.processPDFData(filePath)
-	default:
-		utils.Error("ImportService", "不支持的文件类型", nil, map[string]interface{}{
-			"extension": fileExt,
-		})
-		return &ImportResult{
-			Success:       false,
-			Message:       fmt.Sprintf("不支持的文件类型：%s", fileExt),
-			ImportedCount: 0,
-			TotalCount:    0,
-			Stats:         make(map[string]int),
-		}, nil
-	}
-}
-
-// ProcessFileContent 处理文件内容导入（通过文件内容和类型）
-func (s *ImportService) ProcessFileContent(content string, fileType string) (*ImportResult, error) {
-	utils.Info("ImportService", "开始处理文件内容", map[string]interface{}{
-		"type": fileType,
-	})
-
-	var questions []*models.Question
-	var err error
-
-	switch fileType {
-	case "json":
-		// JSON 可能包含字符串类型的 type 字段，需要特殊处理
-		questions, err = s.parseJSONWithFlexibleType(content)
-		if err != nil {
-			return nil, fmt.Errorf("解析 JSON 失败：%v", err)
-		}
-	case "csv":
-		importer := NewCSVImporter()
-		questions, err = importer.ProcessCSVDataFromContent(content)
-		if err != nil {
-			return nil, err
-		}
-	case "xlsx", "xls":
-		// Excel 需要保存为临时文件
-		return s.importFromBase64Content(content, fileType)
-	case "zip":
-		// ZIP 需要保存为临时文件
-		return s.importFromBase64Content(content, fileType)
-	default:
-		return &ImportResult{
-			Success:       false,
-			Message:       fmt.Sprintf("不支持的文件类型：%s", fileType),
-			ImportedCount: 0,
-			TotalCount:    0,
-			Stats:         make(map[string]int),
-		}, nil
-	}
-
-	return s.ImportQuestions(questions)
-}
-
-// importFromBase64Content 从 base64 编码的内容导入（用于 Excel 和 ZIP）
-func (s *ImportService) importFromBase64Content(base64Content string, fileType string) (*ImportResult, error) {
-	// 解码 base64 内容
-	decoded, err := base64.StdEncoding.DecodeString(base64Content)
-	if err != nil {
-		return nil, fmt.Errorf("解码 base64 失败：%v", err)
-	}
-
-	// 创建临时文件
-	tempFile, err := os.CreateTemp("", "import_*."+fileType)
-	if err != nil {
-		return nil, fmt.Errorf("创建临时文件失败：%v", err)
-	}
-	tempFilePath := tempFile.Name()
-	defer tempFile.Close()
-	defer os.Remove(tempFilePath)
-
-	// 写入临时文件
-	_, err = tempFile.Write(decoded)
-	if err != nil {
-		os.Remove(tempFilePath)
-		return nil, fmt.Errorf("写入临时文件失败：%v", err)
-	}
-
-	// 根据文件类型直接调用对应的处理方法
-	switch fileType {
-	case "xlsx", "xls":
-		return s.processExcelData(tempFilePath)
-	case "zip":
-		return s.processPDFData(tempFilePath)
-	default:
-		return nil, fmt.Errorf("不支持的文件类型：%s", fileType)
-	}
-}
-
-// processJSONData 处理 JSON 文件导入
-func (s *ImportService) processJSONData(filePath string) (*ImportResult, error) {
-	utils.Debug("ImportService", "处理 JSON 文件", map[string]interface{}{
-		"file_path": filePath,
-	})
-
-	// 读取 JSON 文件
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		utils.Error("ImportService", "读取 JSON 文件失败", err, nil)
-		return nil, err
-	}
-
-	// 解析 JSON 数据
-	var questions []*models.Question
-	err = json.Unmarshal(data, &questions)
-	if err != nil {
-		utils.Error("ImportService", "解析 JSON 数据失败", err, nil)
-		return nil, err
-	}
-
-	// 导入题目
-	return s.ImportQuestions(questions)
-}
-
-// processExcelData 处理 Excel 文件导入（Go 原生实现）
-func (s *ImportService) processExcelData(filePath string) (*ImportResult, error) {
-	utils.Debug("ImportService", "处理 Excel 文件（Go 原生）", map[string]interface{}{
-		"file_path": filePath,
-	})
-
-	// 使用 Go 原生实现
-	importer := NewExcelImporter()
-	questions, err := importer.ProcessExcelData(filePath)
-	if err != nil {
-		return nil, err
-	}
-
-	return s.ImportQuestions(questions)
-}
-
-// processCSVData 处理 CSV 文件导入（Go 原生实现）
-func (s *ImportService) processCSVData(filePath string) (*ImportResult, error) {
-	utils.Debug("ImportService", "处理 CSV 文件（Go 原生）", map[string]interface{}{
-		"file_path": filePath,
-	})
-
-	// 使用 Go 原生实现
-	importer := NewCSVImporter()
-	questions, err := importer.ProcessCSVData(filePath)
-	if err != nil {
-		return nil, err
-	}
-
-	return s.ImportQuestions(questions)
-}
-
-// processPDFData 处理 PDF 文件导入（Go 原生实现）
-func (s *ImportService) processPDFData(filePath string) (*ImportResult, error) {
-	utils.Debug("ImportService", "处理 PDF 文件（Go 原生）", map[string]interface{}{
-		"file_path": filePath,
-	})
-
-	// 使用 Go 原生实现
-	importer := NewPDFImporter()
-	questions, err := importer.ProcessPDFData(filePath, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	return s.ImportQuestions(questions)
-}
-
-// GetImportStats 获取导入统计信息
-func (s *ImportService) GetImportStats() (map[string]interface{}, error) {
-	// TODO: 实现统计信息获取
-	return make(map[string]interface{}), nil
-}
-
-// ImportFromFileContent 从文件内容导入题目（仅用于 JSON 和 CSV）
-func (s *ImportService) ImportFromFileContent(content string, fileType string) (*ImportResult, error) {
-	utils.Info("ImportService", "开始从文件内容导入", map[string]interface{}{
-		"type": fileType,
-	})
-
-	var questions []*models.Question
-	var err error
-
-	switch fileType {
-	case "json":
-		// JSON 可能包含字符串类型的 type 字段，需要特殊处理
-		questions, err = s.parseJSONWithFlexibleType(content)
-		if err != nil {
-			return nil, fmt.Errorf("解析 JSON 失败：%v", err)
-		}
-	case "csv":
-		importer := NewCSVImporter()
-		questions, err = importer.ProcessCSVDataFromContent(content)
-		if err != nil {
-			return nil, err
-		}
-	default:
-		return &ImportResult{
-			Success:       false,
-			Message:       fmt.Sprintf("不支持的文件类型：%s", fileType),
-			ImportedCount: 0,
-			TotalCount:    0,
-			Stats:         make(map[string]int),
-		}, nil
-	}
-
-	return s.ImportQuestions(questions)
-}
-
-// parseJSONWithFlexibleType 解析 JSON 数据，支持 type 字段为字符串或数字
-func (s *ImportService) parseJSONWithFlexibleType(content string) ([]*models.Question, error) {
-	// 先解析为通用 map 类型
-	var rawData []map[string]interface{}
-	err := json.Unmarshal([]byte(content), &rawData)
-	if err != nil {
-		return nil, err
-	}
-
-	questions := make([]*models.Question, 0, len(rawData))
-
-	for _, item := range rawData {
-		question := &models.Question{}
-
-		// 解析基本字段
-		if v, ok := item["J"].(string); ok {
-			question.J = v
-		}
-		if v, ok := item["P"].(string); ok {
-			question.P = v
-		}
-		if v, ok := item["I"].(string); ok {
-			question.I = v
-		}
-		if v, ok := item["Q"].(string); ok {
-			question.Q = v
-		}
-		if v, ok := item["T"].(string); ok {
-			question.T = v
-		}
-		if v, ok := item["A"].(string); ok {
-			question.A = v
-		}
-		if v, ok := item["B"].(string); ok {
-			question.B = v
-		}
-		if v, ok := item["C"].(string); ok {
-			question.C = v
-		}
-		if v, ok := item["D"].(string); ok {
-			question.D = v
-		}
-		if v, ok := item["F"].(string); ok {
-			question.F = v
-		}
-		// 解析 LA/LB/LC，支持 int 和字符串类型
-		if v, ok := item["LA"].(int); ok {
-			question.LA = v
-		} else if v, ok := item["LA"].(string); ok {
-			if val, err := strconv.Atoi(v); err == nil {
-				question.LA = val
-			}
-		}
-		if v, ok := item["LB"].(int); ok {
-			question.LB = v
-		} else if v, ok := item["LB"].(string); ok {
-			if val, err := strconv.Atoi(v); err == nil {
-				question.LB = val
-			}
-		}
-		if v, ok := item["LC"].(int); ok {
-			question.LC = v
-		} else if v, ok := item["LC"].(string); ok {
-			if val, err := strconv.Atoi(v); err == nil {
-				question.LC = val
-			}
-		}
-
-		// 解析 type 字段，支持字符串和数字两种类型
-		if v, ok := item["type"]; ok {
-			switch val := v.(type) {
-			case float64:
-				// JSON 数字在 Go 中默认为 float64
-				question.Type = int(val)
-			case string:
-				// 字符串类型，尝试转换为数字
-				typeVal, err := strconv.Atoi(val)
-				if err == nil {
-					question.Type = typeVal
-				}
-			case int:
-				question.Type = val
-			}
-		}
-
-		// 如果 Type 为 0，根据答案长度自动判断题型
-		if question.Type == 0 && question.T != "" {
-			if len(question.T) == 1 {
-				question.Type = 1 // 单选题
-			} else if len(question.T) > 1 {
-				question.Type = 2 // 多选题
-			}
-		}
-
-		questions = append(questions, question)
-	}
-
-	return questions, nil
+	app.Event.Emit("import:progress", p)
 }

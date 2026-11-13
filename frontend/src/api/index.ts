@@ -1,423 +1,229 @@
+import { Events } from "@wailsio/runtime";
+import * as UserService from "@bindings/crac_exam_v3/backend/services/userservice";
+import * as QuestionService from "@bindings/crac_exam_v3/backend/services/questionservice";
+import * as ExamService from "@bindings/crac_exam_v3/backend/services/examservice";
+import * as PracticeService from "@bindings/crac_exam_v3/backend/services/practiceservice";
+import * as StatisticsService from "@bindings/crac_exam_v3/backend/services/statisticsservice";
+import * as SettingsService from "@bindings/crac_exam_v3/backend/services/settingsservice";
+import * as ImportService from "@bindings/crac_exam_v3/backend/services/importservice";
+import * as UpdateService from "@bindings/crac_exam_v3/backend/services/updateservice";
+import * as AppUpdateService from "@bindings/crac_exam_v3/backend/services/appupdateservice";
+import { mockApi } from "./mock";
+import type {
+  AppInfo,
+  AppUpdateProgress,
+  AppUpdateStatus,
+  BankUpdateSettings,
+  BankUpdateStatus,
+  CategoryCount,
+  Dashboard,
+  DBStats,
+  ExamConfig,
+  ExamDetail,
+  ExamResult,
+  ExamStart,
+  ExamSummary,
+  ImportProgress,
+  ImportResult,
+  PracticeData,
+  Question,
+  QuestionPage,
+  ScorePoint,
+  User,
+} from "@/types";
+
 /**
- * Wails runtime 调用封装
- * 提供统一的错误处理和日志记录
+ * 判断是否运行在真正的 Wails 宿主中。
+ * @wailsio/runtime 在普通浏览器里也会注入 window._wails（只提供 UI 预览），
+ * 因此不能只看 _wails 是否存在，而要检查底层 WebView 桥。
  */
+function hasWailsHost(): boolean {
+  if (typeof window === "undefined") return false;
+  const w = window as any;
+  return Boolean(
+    w.chrome?.webview?.postMessage ||
+      w.webkit?.messageHandlers?.external?.postMessage ||
+      w.wails?.invoke,
+  );
+}
 
-import * as UserServiceBindings from '../../wailsjs/go/services/UserService'
-import * as QuestionsBankServiceBindings from '../../wailsjs/go/services/QuestionsBankService'
-import * as SettingsServiceBindings from '../../wailsjs/go/services/SettingsService'
-import * as PracticeServiceBindings from '../../wailsjs/go/services/PracticeService'
-import * as ExamServiceBindings from '../../wailsjs/go/services/ExamService'
-import * as FavoriteServiceBindings from '../../wailsjs/go/services/FavoriteService'
-import * as StatisticsServiceBindings from '../../wailsjs/go/services/StatisticsService'
-import type { services, models } from '../../wailsjs/go/models'
+const isWails = hasWailsHost();
 
-// 用户服务 API 调用
-export const UserService = {
-  Login: async (username: string, idCard: string): Promise<services.UserLoginResponse> => {
-    try {
-      return await UserServiceBindings.Login(username, idCard)
-    } catch (error) {
-      console.error('UserService.Login error:', error)
-      throw error
-    }
-  },
-  
-  Logout: async (): Promise<void> => {
-    try {
-      // 前端登出只需要清除本地状态
-      // 后端没有 Logout 方法
-    } catch (error) {
-      console.error('UserService.Logout error:', error)
-      throw error
-    }
+function cleanError(err: unknown): string {
+  if (typeof err === "string") return err.replace(/^Error:\s*/, "");
+  const message = (err as any)?.message;
+  if (typeof message === "string") return message.replace(/^Error:\s*/, "");
+  return String(err);
+}
+
+async function call<T>(fn: () => Promise<unknown>): Promise<T> {
+  try {
+    return (await fn()) as T;
+  } catch (err) {
+    throw new Error(cleanError(err));
   }
 }
 
-// 题库服务 API 调用
-export const QuestionsBankService = {
-  GetPageData: async (
-    pageNum: number,
+const realApi = {
+  isMock: false,
+
+  login: (username: string, idCard: string) =>
+    call<User>(() => UserService.Login(username, idCard)),
+
+  getDashboard: (userId: number) =>
+    call<Dashboard>(() => StatisticsService.GetDashboard(userId)),
+
+  getPracticeData: (userId: number, category: string, mode: string) =>
+    call<PracticeData>(() => PracticeService.GetPracticeData(userId, category, mode)),
+
+  saveProgress: (userId: number, category: string, index: number) =>
+    call<void>(() => PracticeService.SaveProgress(userId, category, index)),
+
+  saveRandomProgress: (userId: number, category: string, index: number) =>
+    call<void>(() => PracticeService.SaveRandomProgress(userId, category, index)),
+
+  addFavorite: (userId: number, questionId: number, category: string) =>
+    call<boolean>(() => PracticeService.AddFavorite(userId, questionId, category)),
+
+  removeFavorite: (userId: number, questionId: number) =>
+    call<void>(() => PracticeService.RemoveFavorite(userId, questionId)),
+
+  addError: (userId: number, questionId: number, category: string) =>
+    call<boolean>(() => PracticeService.AddError(userId, questionId, category)),
+
+  removeError: (userId: number, questionId: number) =>
+    call<void>(() => PracticeService.RemoveError(userId, questionId)),
+
+  getErrorQuestions: (userId: number, category: string) =>
+    call<Question[]>(() => PracticeService.GetErrorQuestions(userId, category)),
+
+  getFavoriteQuestions: (userId: number, category: string) =>
+    call<Question[]>(() => PracticeService.GetFavoriteQuestions(userId, category)),
+
+  getPage: (
+    page: number,
     pageSize: number,
-    searchQuery: string,
-    filterLA: boolean,
-    filterLB: boolean,
-    filterLC: boolean
-  ): Promise<services.PageDataResult> => {
-    try {
-      return await QuestionsBankServiceBindings.GetPageData(
-        pageNum,
-        pageSize,
-        searchQuery,
-        filterLA,
-        filterLB,
-        filterLC
-      )
-    } catch (error) {
-      console.error('QuestionsBankService.GetPageData error:', error)
-      throw error
-    }
-  },
-  
-  GetQuestionDetail: async (questionID: number): Promise<models.Question> => {
-    try {
-      return await QuestionsBankServiceBindings.GetQuestionByID(questionID)
-    } catch (error) {
-      console.error('QuestionsBankService.GetQuestionDetail error:', error)
-      throw error
-    }
-  },
-  
-  UpdateQuestion: async (questionID: number, updatedData: any): Promise<void> => {
-    try {
-      await QuestionsBankServiceBindings.UpdateQuestion(questionID, updatedData)
-    } catch (error) {
-      console.error('QuestionsBankService.UpdateQuestion error:', error)
-      throw error
-    }
-  },
-  
-  DeleteQuestion: async (questionID: number): Promise<void> => {
-    try {
-      await QuestionsBankServiceBindings.DeleteQuestion(questionID)
-    } catch (error) {
-      console.error('QuestionsBankService.DeleteQuestion error:', error)
-      throw error
-    }
-  }
-}
+    search: string,
+    fa: boolean,
+    fb: boolean,
+    fc: boolean,
+  ) =>
+    call<QuestionPage>(() =>
+      QuestionService.GetPage(page, pageSize, search, fa, fb, fc),
+    ),
 
-// 设置服务 API 调用
-export const SettingsService = {
-  ImportQuestions: async (filePath: string): Promise<services.ImportResult> => {
-    try {
-      return await SettingsServiceBindings.ImportQuestions(filePath)
-    } catch (error) {
-      console.error('SettingsService.ImportQuestions error:', error)
-      throw error
-    }
-  },
-  
-  ClearUserData: async (userID: number): Promise<void> => {
-    try {
-      await SettingsServiceBindings.ClearUserData(userID)
-    } catch (error) {
-      console.error('SettingsService.ClearUserData error:', error)
-      throw error
-    }
-  },
-  
-  ClearQuestionBank: async (): Promise<void> => {
-    try {
-      await SettingsServiceBindings.ClearQuestionBank()
-    } catch (error) {
-      console.error('SettingsService.ClearQuestionBank error:', error)
-      throw error
-    }
-  },
-  
-  GetQuestionsPage: async (
-    pageNum: number,
-    pageSize: number,
-    searchQuery: string,
-    filterLA: boolean,
-    filterLB: boolean,
-    filterLC: boolean
-  ): Promise<{ data: models.Question[], total: number }> => {
-    try {
-      const result = await SettingsServiceBindings.GetQuestionsPage(
-        pageNum,
-        pageSize,
-        searchQuery,
-        filterLA,
-        filterLB,
-        filterLC
-      )
-      // 类型断言，因为 Wails 返回的是 Record<string, any>
-      return result as { data: models.Question[], total: number }
-    } catch (error) {
-      console.error('SettingsService.GetQuestionsPage error:', error)
-      throw error
-    }
-  },
-  
-  UpdateQuestion: async (questionID: number, updatedData: any): Promise<void> => {
-    try {
-      await SettingsServiceBindings.UpdateQuestion(questionID, updatedData)
-    } catch (error) {
-      console.error('SettingsService.UpdateQuestion error:', error)
-      throw error
-    }
-  },
-  
-  DeleteQuestion: async (questionID: number): Promise<void> => {
-    try {
-      await SettingsServiceBindings.DeleteQuestion(questionID)
-    } catch (error) {
-      console.error('SettingsService.DeleteQuestion error:', error)
-      throw error
-    }
-  },
-  
-  GetQuestionDetail: async (questionID: number): Promise<models.Question> => {
-    try {
-      return await SettingsServiceBindings.GetQuestionByID(questionID)
-    } catch (error) {
-      console.error('SettingsService.GetQuestionDetail error:', error)
-      throw error
-    }
-  },
-  
-  GetAppInfo: async (): Promise<services.AppInfo> => {
-    try {
-      return await SettingsServiceBindings.GetAppInfo()
-    } catch (error) {
-      console.error('SettingsService.GetAppInfo error:', error)
-      throw error
-    }
-  },
-  
-  GetExamConfig: async (category: string): Promise<any> => {
-    try {
-      return await SettingsServiceBindings.GetExamConfig(category)
-    } catch (error) {
-      console.error('SettingsService.GetExamConfig error:', error)
-      throw error
-    }
-  },
-  
-  GetAllExamConfigs: async (): Promise<Record<string, any>> => {
-    try {
-      return await SettingsServiceBindings.GetAllExamConfigs()
-    } catch (error) {
-      console.error('SettingsService.GetAllExamConfigs error:', error)
-      throw error
-    }
-  }
-}
+  getQuestion: (id: number) =>
+    call<Question | null>(() => QuestionService.GetQuestion(id)),
 
-// 练习服务 API 调用
-export const PracticeService = {
-  GetQuestionsByCategory: async (category: string): Promise<models.Question[]> => {
-    try {
-      return await PracticeServiceBindings.GetQuestionsByCategory(category)
-    } catch (error) {
-      console.error('PracticeService.GetQuestionsByCategory error:', error)
-      throw error
-    }
-  },
-  
-  ShuffleOptions: async (questions: models.Question[]): Promise<models.Question[]> => {
-    try {
-      return await PracticeServiceBindings.ShuffleOptions(questions)
-    } catch (error) {
-      console.error('PracticeService.ShuffleOptions error:', error)
-      throw error
-    }
-  },
-  
-  GetPracticeProgress: async (userID: number, category: string): Promise<number> => {
-    try {
-      return await PracticeServiceBindings.GetPracticeProgress(userID, category)
-    } catch (error) {
-      console.error('PracticeService.GetPracticeProgress error:', error)
-      throw error
-    }
-  },
-  
-  SavePracticeProgress: async (userID: number, category: string, index: number): Promise<void> => {
-    try {
-      await PracticeServiceBindings.SavePracticeProgress(userID, category, index)
-    } catch (error) {
-      console.error('PracticeService.SavePracticeProgress error:', error)
-      throw error
-    }
-  },
-  
-  ResetProgress: async (userID: number, category: string): Promise<void> => {
-    try {
-      await PracticeServiceBindings.ResetProgress(userID, category)
-    } catch (error) {
-      console.error('PracticeService.ResetProgress error:', error)
-      throw error
-    }
-  }
-}
+  updateQuestion: (q: Question) =>
+    call<void>(() => QuestionService.UpdateQuestion(q as any)),
 
-// 考试服务 API 调用
-export const ExamService = {
-  StartExam: async (category: string): Promise<services.ExamStartResponse> => {
-    try {
-      // 从 store 获取用户 ID
-      const userStore = await import('@/stores/user')
-      const userID = userStore.useUserStore().currentUser?.user_id || 0
-      // 现在 CreateExam 直接返回 ExamStartResponse 对象
-      const result = await ExamServiceBindings.CreateExam(userID, category)
-      
-      console.log('CreateExam 返回值:', result)
-      
-      // 检查返回值是否为 null
-      if (!result) {
-        console.log('题库为空，返回 null')
-        return null as any
-      }
-      
-      console.log('题目数量:', result.questions?.length)
-      
-      return result
-    } catch (error) {
-      console.error('ExamService.StartExam error:', error)
-      throw error
-    }
-  },
-  
-  SubmitExam: async (examID: number, answers: Record<number, string>, _startTime: number): Promise<services.ExamResult> => {
-    try {
-      // 转换答案为后端需要的格式
-      const answersRecord: Record<number, { Answer: string; IsCorrect?: boolean }> = {}
-      Object.entries(answers).forEach(([key, value]) => {
-        answersRecord[Number(key)] = { Answer: value }
-      })
-      
-      // 计算考试时长（秒）
-      // const duration = Math.floor((Date.now() - startTime) / 1000)
-      
-      // 创建当前时间对象传递给后端
-      const now = new Date().toISOString()
-      
-      return await ExamServiceBindings.SubmitExam(examID, answersRecord, now)
-    } catch (error) {
-      console.error('ExamService.SubmitExam error:', error)
-      throw error
-    }
-  },
-  
-  GetExamResult: async (examID: number): Promise<services.ExamResult> => {
-    try {
-      return await ExamServiceBindings.GetExamResult(examID)
-    } catch (error) {
-      console.error('ExamService.GetExamResult error:', error)
-      throw error
-    }
-  },
-  
-  InvalidateExam: async (examID: number): Promise<void> => {
-    try {
-      await ExamServiceBindings.InvalidateExam(examID)
-    } catch (error) {
-      console.error('ExamService.InvalidateExam error:', error)
-      throw error
-    }
-  },
-  
-  GetExamQuestions: async (examID: number): Promise<models.ExamQuestionDetail[]> => {
-    try {
-      return await ExamServiceBindings.GetExamQuestions(examID)
-    } catch (error) {
-      console.error('ExamService.GetExamQuestions error:', error)
-      throw error
-    }
-  }
-}
+  deleteQuestion: (id: number) =>
+    call<void>(() => QuestionService.DeleteQuestion(id)),
 
-// 错题本和收藏服务 API 调用
-export const FavoriteService = {
-  GetErrorQuestionsByCategory: async (userID: number, category: string): Promise<models.Question[]> => {
-    try {
-      return await PracticeServiceBindings.GetErrorQuestions(userID, category)
-    } catch (error) {
-      console.error('FavoriteService.GetErrorQuestionsByCategory error:', error)
-      throw error
-    }
-  },
-  
-  GetFavoriteQuestionsByCategory: async (userID: number, category: string): Promise<models.Question[]> => {
-    try {
-      return await FavoriteServiceBindings.GetFavoriteQuestions(userID, category)
-    } catch (error) {
-      console.error('FavoriteService.GetFavoriteQuestionsByCategory error:', error)
-      throw error
-    }
-  },
-  
-  AddToFavorite: async (userID: number, questionID: number, category: string): Promise<void> => {
-    try {
-      await FavoriteServiceBindings.AddFavoriteQuestion(userID, questionID, category)
-    } catch (error) {
-      console.error('FavoriteService.AddToFavorite error:', error)
-      throw error
-    }
-  },
-  
-  RemoveFromFavorite: async (userID: number, questionID: number): Promise<void> => {
-    try {
-      await FavoriteServiceBindings.RemoveFavoriteQuestion(userID, questionID)
-    } catch (error) {
-      console.error('FavoriteService.RemoveFromFavorite error:', error)
-      throw error
-    }
-  },
-  
-  AddToErrorBook: async (userID: number, questionID: number, category: string): Promise<void> => {
-    try {
-      // 后端函数签名：AddErrorQuestion(questionID, category, userID)
-      await PracticeServiceBindings.AddErrorQuestion(questionID, category, userID)
-    } catch (error) {
-      console.error('FavoriteService.AddToErrorBook error:', error)
-      throw error
-    }
-  }
-}
+  getCategoryCounts: () =>
+    call<CategoryCount[]>(() => QuestionService.GetCategoryCounts()),
 
-// 统计服务 API 调用
-export const StatisticsService = {
-  GetExamData: async (userID: number, category: string, timeRange: string): Promise<models.ExamStatisticsData[]> => {
-    try {
-      return await StatisticsServiceBindings.GetExamData(userID, category, timeRange)
-    } catch (error) {
-      console.error('StatisticsService.GetExamData error:', error)
-      throw error
-    }
+  getConfig: (category: string) =>
+    call<ExamConfig>(() => ExamService.GetConfig(category)),
+
+  createExam: (userId: number, category: string) =>
+    call<ExamStart>(() => ExamService.CreateExam(userId, category)),
+
+  submitExam: (examId: number, answers: Record<string, string>) =>
+    call<ExamResult>(() => ExamService.SubmitExam(examId, answers)),
+
+  getResult: (examId: number) =>
+    call<ExamResult>(() => ExamService.GetResult(examId)),
+
+  getDetails: (examId: number) =>
+    call<ExamDetail[]>(() => ExamService.GetDetails(examId)),
+
+  invalidateExam: (examId: number) =>
+    call<void>(() => ExamService.InvalidateExam(examId)),
+
+  getUserExamRecords: (userId: number, limit: number) =>
+    call<ExamSummary[]>(() => ExamService.GetUserExamRecords(userId, limit)),
+
+  getScoreSeries: (userId: number, category: string, days: number) =>
+    call<ScorePoint[]>(() =>
+      StatisticsService.GetScoreSeries(userId, category, days),
+    ),
+
+  pickZipFile: () =>
+    call<string>(() => ImportService.PickZipFile()),
+
+  importZip: (path: string) =>
+    call<ImportResult>(() => ImportService.ImportZip(path)),
+
+  getBankUpdateStatus: () =>
+    call<BankUpdateStatus>(() => UpdateService.GetStatus()),
+
+  getBankUpdateSettings: () =>
+    call<BankUpdateSettings>(() => UpdateService.GetSettings()),
+
+  setBankAutoUpdate: (autoCheck: boolean, autoImport: boolean) =>
+    call<void>(() => UpdateService.SetAutoUpdate(autoCheck, autoImport)),
+
+  checkBankUpdate: () =>
+    call<BankUpdateStatus>(() => UpdateService.Check()),
+
+  applyBankUpdate: () =>
+    call<ImportResult>(() => UpdateService.Apply()),
+
+  onBankUpdateStatus(cb: (s: BankUpdateStatus) => void): () => void {
+    return Events.On("bank:update-status", (event: any) => cb(event.data));
   },
-  
-  CalculateExamStatistics: async (examData: any[]): Promise<services.ExamStatisticsResult> => {
-    try {
-      return await StatisticsServiceBindings.CalculateExamStatistics(examData)
-    } catch (error) {
-      console.error('StatisticsService.CalculateExamStatistics error:', error)
-      throw error
-    }
+
+  getAppUpdateStatus: () =>
+    call<AppUpdateStatus>(() => AppUpdateService.GetStatus()),
+
+  setAppUpdateRepo: (repo: string) =>
+    call<void>(() => AppUpdateService.SetRepo(repo)),
+
+  checkAppUpdate: () =>
+    call<AppUpdateStatus>(() => AppUpdateService.Check()),
+
+  downloadAppUpdate: () =>
+    call<AppUpdateStatus>(() => AppUpdateService.Download()),
+
+  runAppUpdateInstaller: () =>
+    call<void>(() => AppUpdateService.RunInstaller()),
+
+  openAppUpdateRelease: () =>
+    call<void>(() => AppUpdateService.OpenReleasePage()),
+
+  openAppUpdateFolder: () =>
+    call<void>(() => AppUpdateService.OpenDownloadFolder()),
+
+  onAppUpdateStatus(cb: (s: AppUpdateStatus) => void): () => void {
+    return Events.On("app:update-status", (event: any) => cb(event.data));
   },
-  
-  GetPracticeAccuracy: async (userID: number): Promise<number> => {
-    try {
-      // 后端没有直接的方法，使用 GetUserStatistics
-      const stats = await StatisticsServiceBindings.GetUserStatistics(userID)
-      return stats.avg_practice_rate || 0
-    } catch (error) {
-      console.error('StatisticsService.GetPracticeAccuracy error:', error)
-      throw error
-    }
+
+  onAppUpdateProgress(cb: (p: AppUpdateProgress) => void): () => void {
+    return Events.On("app:update-progress", (event: any) => cb(event.data));
   },
-  
-  GetErrorCount: async (_userID: number, _category?: string): Promise<number> => {
-    try {
-      // 后端没有直接的方法，需要从 GetUserStatistics 获取
-      const stats = await StatisticsServiceBindings.GetUserStatistics(_userID)
-      return stats.total_errors || 0
-    } catch (error) {
-      console.error('StatisticsService.GetErrorCount error:', error)
-      throw error
-    }
+
+  clearUserData: (userId: number) =>
+    call<void>(() => SettingsService.ClearUserData(userId)),
+
+  clearQuestionBank: () =>
+    call<void>(() => SettingsService.ClearQuestionBank()),
+
+  getDBStats: () =>
+    call<DBStats>(() => SettingsService.GetDBStats()),
+
+  getAppInfo: () =>
+    call<AppInfo>(() => SettingsService.GetAppInfo()),
+
+  onImportProgress(cb: (p: ImportProgress) => void): () => void {
+    return Events.On("import:progress", (event: any) => cb(event.data));
   },
-  
-  GetFavoriteCount: async (userID: number, category?: string): Promise<number> => {
-    try {
-      // 后端没有直接的方法，使用 FavoriteServiceBindings.GetFavoriteCount
-      return await FavoriteServiceBindings.GetFavoriteCount(userID, category || '')
-    } catch (error) {
-      console.error('StatisticsService.GetFavoriteCount error:', error)
-      throw error
-    }
-  }
-}
+
+  onFilesDropped(cb: (paths: string[]) => void): () => void {
+    return Events.On("files-dropped", (event: any) => cb(event.data));
+  },
+};
+
+export const api = isWails ? realApi : mockApi;
+export const usingMock = !isWails;

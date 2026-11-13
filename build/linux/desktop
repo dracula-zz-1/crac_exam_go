@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Name=业余无线电模拟考试
+Comment=CRAC 业余无线电台操作技术能力验证模拟考试系统
+# The Exec line includes %u to pass the URL to the application
+Exec=/usr/local/bin/crac-exam-v3 %u
+Terminal=false
+Type=Application
+Icon=crac-exam-v3
+Categories=Utility;
+StartupWMClass=crac-exam-v3
+
+ 

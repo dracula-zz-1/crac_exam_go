@@ -1,697 +1,1025 @@
+<script setup lang="ts">
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { onBeforeRouteLeave, useRouter } from "vue-router";
+import { api } from "@/api";
+import { useSessionStore } from "@/stores/session";
+import { useToastStore } from "@/stores/toast";
+import type { Category, ExamConfig, ExamQuestion, ExamStart } from "@/types";
+import AppIcon from "@/components/AppIcon.vue";
+import OptionList from "@/components/OptionList.vue";
+import BaseModal from "@/components/BaseModal.vue";
+
+const props = defineProps<{ category: string }>();
+const router = useRouter();
+const session = useSessionStore();
+const toast = useToastStore();
+
+const CATEGORY = computed<Category>(() =>
+  ["A", "B", "C"].includes(props.category.toUpperCase())
+    ? (props.category.toUpperCase() as Category)
+    : "A",
+);
+
+const META: Record<Category, { label: string; desc: string; pass: number; total: number; minutes: number }> = {
+  A: { label: "A 类", desc: "基础操作能力验证", pass: 30, total: 40, minutes: 40 },
+  B: { label: "B 类", desc: "常用频段与设备操作", pass: 45, total: 60, minutes: 60 },
+  C: { label: "C 类", desc: "短波与高级操作能力", pass: 70, total: 90, minutes: 90 },
+};
+
+const meta = computed(() => META[CATEGORY.value]);
+
+const config = ref<ExamConfig | null>(null);
+const startData = ref<ExamStart | null>(null);
+const starting = ref(false);
+const startError = ref("");
+const answers = ref<Record<number, string>>({});
+const index = ref(0);
+const endAt = ref(0);
+const remaining = ref(0);
+const submitted = ref(false);
+const submitting = ref(false);
+const navOpen = ref(false);
+const submitOpen = ref(false);
+const exitOpen = ref(false);
+const autoSubmitTriggered = ref(false);
+let timer: number | null = null;
+
+const live = computed(() => !!startData.value && !submitted.value);
+const questions = computed<ExamQuestion[]>(() => startData.value?.questions ?? []);
+const question = computed<ExamQuestion | null>(() => questions.value[index.value] ?? null);
+const total = computed(() => questions.value.length);
+const answeredCount = computed(
+  () => Object.values(answers.value).filter((v) => v.length > 0).length,
+);
+const unanswered = computed(() => total.value - answeredCount.value);
+const isMulti = computed(() => question.value?.type === 2);
+const selected = computed(() => {
+  const q = question.value;
+  if (!q) return [];
+  return (answers.value[q.id] ?? "").split("").filter(Boolean);
+});
+
+const timeLimit = computed(() => startData.value?.timeLimitSeconds ?? meta.value.minutes * 60);
+const timePercent = computed(() =>
+  timeLimit.value ? Math.max(0, Math.min(100, (remaining.value / timeLimit.value) * 100)) : 0,
+);
+const timeText = computed(() => {
+  const s = Math.max(0, remaining.value);
+  const m = Math.floor(s / 60);
+  const sec = s % 60;
+  return `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+});
+const timeDanger = computed(() => remaining.value <= 300);
+
+const options = computed(() => {
+  const q = question.value;
+  if (!q) return [];
+  return [
+    { key: "A", text: q.A },
+    { key: "B", text: q.B },
+    { key: "C", text: q.C },
+    { key: "D", text: q.D },
+  ];
+});
+
+function normalize(raw: string) {
+  return [...new Set(raw.toUpperCase().replace(/[^A-D]/g, "").split(""))].sort().join("");
+}
+
+async function loadConfig() {
+  try {
+    config.value = await api.getConfig(CATEGORY.value);
+  } catch {
+    config.value = {
+      total: meta.value.total,
+      single: CATEGORY.value === "A" ? 32 : CATEGORY.value === "B" ? 45 : 70,
+      multiple: CATEGORY.value === "A" ? 8 : CATEGORY.value === "B" ? 15 : 20,
+      timeMinutes: meta.value.minutes,
+      passScore: meta.value.pass,
+    };
+  }
+}
+
+async function start() {
+  if (!session.user) return;
+  starting.value = true;
+  startError.value = "";
+  try {
+    const data = await api.createExam(session.user.id, CATEGORY.value);
+    startData.value = data;
+    answers.value = {};
+    index.value = 0;
+    submitted.value = false;
+    autoSubmitTriggered.value = false;
+    endAt.value = Date.now() + data.timeLimitSeconds * 1000;
+    remaining.value = data.timeLimitSeconds;
+    startTimer();
+    toast.success("考试开始", `${data.total} 题 · ${Math.round(data.timeLimitSeconds / 60)} 分钟`);
+  } catch (e: any) {
+    startError.value = e?.message || "开始考试失败";
+  } finally {
+    starting.value = false;
+  }
+}
+
+function startTimer() {
+  stopTimer();
+  tick();
+  timer = window.setInterval(tick, 500);
+}
+function stopTimer() {
+  if (timer !== null) {
+    clearInterval(timer);
+    timer = null;
+  }
+}
+function tick() {
+  if (!startData.value || submitted.value) return;
+  remaining.value = Math.max(0, Math.ceil((endAt.value - Date.now()) / 1000));
+  if (remaining.value <= 0 && !autoSubmitTriggered.value) {
+    autoSubmitTriggered.value = true;
+    doSubmit(true);
+  }
+}
+
+function select(key: string) {
+  const q = question.value;
+  if (!q || submitting.value) return;
+  if (q.type === 2) {
+    const current = (answers.value[q.id] ?? "").split("").filter(Boolean);
+    const next = current.includes(key)
+      ? current.filter((k) => k !== key)
+      : [...current, key];
+    answers.value = { ...answers.value, [q.id]: normalize(next.join("")) };
+  } else {
+    answers.value = { ...answers.value, [q.id]: key };
+  }
+}
+
+function goTo(i: number) {
+  if (i < 0 || i >= total.value) return;
+  index.value = i;
+  navOpen.value = false;
+}
+function next() {
+  if (index.value < total.value - 1) index.value++;
+}
+function prev() {
+  if (index.value > 0) index.value--;
+}
+
+function askSubmit() {
+  if (!live.value) return;
+  submitOpen.value = true;
+}
+
+async function doSubmit(auto = false) {
+  if (!startData.value || submitting.value || submitted.value) return;
+  submitting.value = true;
+  submitOpen.value = false;
+  stopTimer();
+  try {
+    const answerMap: Record<string, string> = {};
+    for (const q of questions.value) {
+      const value = answers.value[q.id] ?? "";
+      if (value) answerMap[String(q.id)] = value;
+    }
+    const result = await api.submitExam(startData.value.examId, answerMap);
+    submitted.value = true;
+    toast.success(auto ? "时间到，已自动交卷" : "交卷成功", `得分 ${result.score} / ${result.totalCount}`);
+    router.replace(`/result/${result.examId}`);
+  } catch (e: any) {
+    submitting.value = false;
+    toast.error("交卷失败", e?.message || "请稍后重试");
+    if (remaining.value > 0) startTimer();
+  }
+}
+
+async function exitExam() {
+  if (startData.value) {
+    try {
+      await api.invalidateExam(startData.value.examId);
+    } catch {
+      /* ignore */
+    }
+  }
+  stopTimer();
+  router.push("/home");
+}
+
+function confirmExit() {
+  if (!live.value) {
+    router.push("/home");
+    return;
+  }
+  exitOpen.value = true;
+}
+
+function onKey(e: KeyboardEvent) {
+  if (!live.value || navOpen.value || submitOpen.value || exitOpen.value) return;
+  const target = e.target as HTMLElement;
+  if (["INPUT", "TEXTAREA"].includes(target?.tagName)) return;
+  const key = e.key.toUpperCase();
+  if (["A", "B", "C", "D", "1", "2", "3", "4"].includes(key)) {
+    select("1234".includes(key) ? "ABCD"[Number(key) - 1] : key);
+    e.preventDefault();
+  } else if (e.key === "ArrowRight") {
+    next();
+  } else if (e.key === "ArrowLeft") {
+    prev();
+  }
+}
+
+onBeforeRouteLeave(async (_to, _from, done) => {
+  if (!live.value) return done();
+  const ok = window.confirm("考试正在进行，离开将作废本次考试，确定离开吗？");
+  if (!ok) return done(false);
+  try {
+    if (startData.value) await api.invalidateExam(startData.value.examId);
+  } catch {
+    /* ignore */
+  }
+  stopTimer();
+  done();
+});
+
+onMounted(() => {
+  loadConfig();
+  window.addEventListener("keydown", onKey);
+});
+onBeforeUnmount(() => {
+  stopTimer();
+  window.removeEventListener("keydown", onKey);
+});
+</script>
+
 <template>
-  <div class="exam-container">
-    <!-- 考试前确认界面 -->
-    <div class="exam-confirm" v-if="!examStarted">
-      <div class="confirm-card">
-        <div class="back-button" @click="goBack">
-          <el-icon><ArrowLeft /></el-icon>
-          <span>返回</span>
-        </div>
-        
-        <h1 class="main-title">业余无线电台操作技术能力验证</h1>
-        <h2 class="sub-title">模拟考试</h2>
-        
-        <div class="category-letter">{{ userStore.currentCategory }}</div>
-        
-        <div class="exam-details">
-          <div class="detail-line">
-            共<span class="highlight">{{ examConfig?.total || 0 }}</span>题
-          </div>
-          <div class="detail-line">
-            其中单选<span class="highlight-red">{{ examConfig?.single || 0 }}</span>题，
-            多选<span class="highlight-red">{{ examConfig?.multiple || 0 }}</span>题
-          </div>
-          <div class="detail-line">
-            每题<span class="highlight-red">1</span>分，
-            <span class="highlight-red">{{ examConfig?.pass_score || 0 }}</span>分通过
-          </div>
-          <div class="detail-line">
-            考试时间<span class="highlight-red">{{ examConfig?.time_minutes || 0 }}</span>分钟
-          </div>
-        </div>
-        
-        <div class="start-button-area">
-          <el-button type="primary" @click="startExam">
-            开始考试
-          </el-button>
-        </div>
-      </div>
-    </div>
+  <div class="page exam-page">
+    <!-- 开考确认 -->
+    <template v-if="!startData">
+      <button class="back-btn" @click="router.push('/home')">
+        <AppIcon name="arrowLeft" :size="17" />
+        返回总览
+      </button>
 
-    <!-- 考试界面 -->
-    <div v-else class="exam-interface">
-      <!-- 顶部信息栏 -->
-      <div class="header">
-        <div class="back-btn" @click="confirmExit">
-          <el-icon :size="20"><Back /></el-icon>
-          <span>返回</span>
+      <section class="intro cat" :class="`cat-${CATEGORY}`">
+        <div class="intro-main">
+          <span class="eyebrow">MOCK EXAM · {{ CATEGORY }} 类</span>
+          <h1>{{ CATEGORY }} 类模拟考试</h1>
+          <p>{{ meta.desc }}。按真实考试规则随机组卷，开始后计时不可暂停。</p>
+
+          <div class="intro-config">
+            <div class="cfg">
+              <strong>{{ config?.total ?? meta.total }}</strong>
+              <span>总题数</span>
+            </div>
+            <div class="cfg">
+              <strong>{{ config?.single ?? "—" }}</strong>
+              <span>单选题</span>
+            </div>
+            <div class="cfg">
+              <strong>{{ config?.multiple ?? "—" }}</strong>
+              <span>多选题</span>
+            </div>
+            <div class="cfg">
+              <strong>{{ config?.timeMinutes ?? meta.minutes }}<small>分钟</small></strong>
+              <span>考试时间</span>
+            </div>
+            <div class="cfg accent">
+              <strong>{{ config?.passScore ?? meta.pass }}<small>分</small></strong>
+              <span>及格线</span>
+            </div>
+          </div>
+
+          <ul class="rules">
+            <li><AppIcon name="clock" :size="15" /> 开始后由服务端计时，时间到自动交卷</li>
+            <li><AppIcon name="shield" :size="15" /> 题目与选项随机打乱，答案由服务端判定</li>
+            <li><AppIcon name="errors" :size="15" /> 答错与未作答的题目会自动进入错题本</li>
+          </ul>
+
+          <div v-if="startError" class="intro-error">
+            <AppIcon name="warning" :size="15" />
+            <div>
+              <strong>{{ startError }}</strong>
+              <button class="btn btn-sm btn-ghost" @click="router.push('/settings')">去导入题库</button>
+            </div>
+          </div>
+
+          <div class="intro-actions">
+            <button class="btn btn-accent btn-lg" :disabled="starting" @click="start">
+              <span v-if="starting" class="spinner dark" />
+              <template v-else>
+                开始考试
+                <AppIcon name="arrowRight" :size="17" />
+              </template>
+            </button>
+            <span class="intro-hint">共 {{ config?.total ?? meta.total }} 题 · 每题 1 分</span>
+          </div>
         </div>
-        <div class="info-text">
-          <span>模拟考试 - {{ userStore.currentCategory }}类</span>
-          <span class="total-questions">共 {{ examConfig?.total || 0 }} 题</span>
-          <span class="exam-time">考试时间：{{ examConfig?.time_minutes || 0 }}分钟</span>
-          <span class="timer">剩余时间：{{ formattedTime }}</span>
+
+        <div class="intro-art" aria-hidden="true">
+          <span class="intro-letter">{{ CATEGORY }}</span>
+          <svg viewBox="0 0 360 360" fill="none">
+            <circle cx="180" cy="180" r="58" stroke="var(--cat)" stroke-opacity=".5" stroke-width="1.4" />
+            <circle cx="180" cy="180" r="102" stroke="var(--cat)" stroke-opacity=".28" stroke-width="1.2" />
+            <circle cx="180" cy="180" r="146" stroke="var(--cat)" stroke-opacity=".14" stroke-width="1" />
+            <circle cx="180" cy="180" r="7" fill="var(--cat)" />
+            <path d="M40 230 Q90 190 140 230 T240 230 T340 230" stroke="var(--cat)" stroke-opacity=".4" stroke-width="1.4" />
+          </svg>
         </div>
-        <div class="action-buttons">
-          <el-button @click="showCardDialog = true">
-            <el-icon><Document /></el-icon>
+      </section>
+    </template>
+
+    <!-- 考试中 -->
+    <template v-else>
+      <header class="exam-bar surface">
+        <button class="back-icon" @click="confirmExit">
+          <AppIcon name="arrowLeft" :size="18" />
+        </button>
+        <div class="exam-title">
+          <span class="chip" :class="`chip-${CATEGORY === 'A' ? 'amber' : CATEGORY === 'B' ? 'teal' : 'blue'}`">
+            {{ CATEGORY }} 类
+          </span>
+          <strong>模拟考试</strong>
+        </div>
+        <div class="exam-progress">
+          <span>已答 <b>{{ answeredCount }}</b> / {{ total }}</span>
+          <div class="progress" style="width: 180px">
+            <span :style="{ width: (answeredCount / Math.max(1, total)) * 100 + '%' }" />
+          </div>
+        </div>
+        <div class="timer-pill" :class="{ danger: timeDanger }">
+          <AppIcon name="clock" :size="16" />
+          <span class="mono">{{ timeText }}</span>
+        </div>
+        <div class="exam-actions">
+          <button class="btn btn-sm btn-ghost" @click="navOpen = true">
+            <AppIcon name="grid" :size="14" />
             答题卡
-          </el-button>
-          <el-button type="danger" @click="confirmSubmit">
-            <el-icon><Check /></el-icon>
+          </button>
+          <button class="btn btn-sm btn-accent" :disabled="submitting" @click="askSubmit">
+            <AppIcon name="check" :size="14" />
             交卷
-          </el-button>
+          </button>
         </div>
+      </header>
+
+      <div class="time-track">
+        <span :style="{ width: timePercent + '%' }" :class="{ danger: timeDanger }" />
       </div>
 
-    <!-- 题目区域 -->
-    <div class="question-area">
-      <div class="question-content-wrapper" v-if="currentQuestion">
-        <div class="question-text">
-          <span class="question-number">第 {{ currentIndex + 1 }}/{{ totalQuestions }} 题</span>
-          <span class="question-type">({{ questionTypeText }})</span>
-          <span class="question-content">{{ currentQuestion.Q }}</span>
-        </div>
+      <div class="exam-grid" v-if="question">
+        <section class="q-card surface">
+          <div class="q-top">
+            <div class="q-meta">
+              <span class="chip" :class="isMulti ? 'chip-teal' : 'chip-amber'">
+                {{ isMulti ? "多选题" : "单选题" }}
+              </span>
+              <span class="q-index mono">第 {{ index + 1 }} / {{ total }} 题</span>
+            </div>
+            <span class="q-code mono">{{ question.J }}</span>
+          </div>
 
-        <!-- 图片显示 -->
-        <div class="question-image" v-if="currentQuestion.hasImage && currentQuestion.imageBase64">
-          <img :src="currentQuestion.imageBase64" alt="题目图片" />
-        </div>
+          <h2 class="q-stem">{{ question.Q }}</h2>
 
-        <!-- 选项区域 -->
-        <div class="options-area">
-          <div
-            v-for="option in options"
-            :key="option.key"
-            :class="['option-item', { 'selected': userAnswers[currentQuestion.id]?.includes(option.key) }]"
-            @click="selectAnswer(option.key)"
-          >
-            <span class="option-key">{{ option.key }}.</span>
-            <span class="option-text">{{ option.text }}</span>
+          <div v-if="question.F" class="q-image">
+            <img :src="question.F" alt="题目图片" />
+          </div>
+
+          <OptionList
+            :options="options"
+            :selected="selected"
+            :multi="isMulti"
+            @select="select"
+          />
+
+          <div class="q-actions">
+            <button class="btn btn-ghost" :disabled="index === 0" @click="prev">
+              <AppIcon name="chevronLeft" :size="16" />
+              上一题
+            </button>
+            <span class="spacer" />
+            <button class="btn btn-soft" @click="navOpen = true">答题卡</button>
+            <button class="btn" :disabled="index === total - 1" @click="next">
+              下一题
+              <AppIcon name="chevronRight" :size="16" />
+            </button>
+          </div>
+        </section>
+
+        <aside class="exam-side">
+          <section class="surface card-pad side-card">
+            <div class="side-timer" :class="{ danger: timeDanger }">
+              <span class="mono">{{ timeText }}</span>
+              <em>剩余时间</em>
+            </div>
+            <div class="side-stats">
+              <div>
+                <strong>{{ answeredCount }}</strong>
+                <span>已答</span>
+              </div>
+              <div>
+                <strong style="color: var(--red)">{{ unanswered }}</strong>
+                <span>未答</span>
+              </div>
+              <div>
+                <strong>{{ Math.round((answeredCount / Math.max(1, total)) * 100) }}%</strong>
+                <span>完成</span>
+              </div>
+            </div>
+          </section>
+
+          <section class="surface card-pad side-card">
+            <h3 class="side-title">答题卡</h3>
+            <div class="mini-grid">
+              <button
+                v-for="(q, i) in questions"
+                :key="q.id"
+                class="mini-cell"
+                :class="{
+                  answered: (answers[q.id] ?? '').length > 0,
+                  current: i === index,
+                }"
+                @click="goTo(i)"
+              >
+                {{ i + 1 }}
+              </button>
+            </div>
+            <div class="legend">
+              <span><i class="lg current" /> 当前</span>
+              <span><i class="lg answered" /> 已答</span>
+              <span><i class="lg" /> 未答</span>
+            </div>
+          </section>
+
+          <button class="btn btn-accent btn-block" @click="askSubmit">
+            交卷并查看成绩
+          </button>
+        </aside>
+      </div>
+    </template>
+
+    <!-- 答题卡 -->
+    <BaseModal
+      :open="navOpen"
+      title="答题卡"
+      :subtitle="`已答 ${answeredCount} / ${total} 题`"
+      wide
+      @close="navOpen = false"
+    >
+      <div class="nav-grid">
+        <button
+          v-for="(q, i) in questions"
+          :key="q.id"
+          class="nav-cell"
+          :class="{
+            answered: (answers[q.id] ?? '').length > 0,
+            current: i === index,
+          }"
+          @click="goTo(i)"
+        >
+          {{ i + 1 }}
+        </button>
+      </div>
+      <template #footer>
+        <button class="btn btn-ghost" @click="navOpen = false">继续答题</button>
+        <button class="btn btn-accent" @click="navOpen = false; askSubmit()">交卷</button>
+      </template>
+    </BaseModal>
+
+    <!-- 交卷确认 -->
+    <BaseModal
+      :open="submitOpen"
+      title="确认交卷"
+      :subtitle="unanswered > 0 ? `还有 ${unanswered} 道题未作答` : '所有题目均已作答'"
+      @close="submitOpen = false"
+    >
+      <div class="submit-info">
+        <div class="submit-icon"><AppIcon name="exam" :size="22" /></div>
+        <div>
+          <strong>交卷后不能再修改答案</strong>
+          <p>系统会立即判分，并显示成绩与试卷复盘。</p>
+          <div v-if="unanswered > 0" class="submit-warn">
+            未作答的 {{ unanswered }} 道题将按错误计入，并加入错题本。
           </div>
         </div>
       </div>
-    </div>
+      <template #footer>
+        <button class="btn btn-ghost" @click="submitOpen = false">再检查一下</button>
+        <button class="btn btn-accent" :disabled="submitting" @click="doSubmit(false)">
+          <span v-if="submitting" class="spinner dark" />
+          确认交卷
+        </button>
+      </template>
+    </BaseModal>
 
-    <!-- 底部导航 - 固定在底部 -->
-    <div class="bottom-navigation-fixed">
-      <el-button @click="previousQuestion" :disabled="currentIndex === 0">
-        <el-icon><ArrowLeft /></el-icon>
-        上一题
-      </el-button>
-      <el-button type="primary" @click="nextQuestion" :disabled="currentIndex === totalQuestions - 1">
-        下一题
-        <el-icon><ArrowRight /></el-icon>
-      </el-button>
-    </div>
-
-    <!-- 答题卡对话框 -->
-    <el-dialog v-model="showCardDialog" width="900px" :style="{ maxHeight: '90vh', overflow: 'hidden' }" :show-close="false" top="2vh">
-      <div class="answer-card" @click.self="showCardDialog = false" style="max-height: 80vh; overflow-y: auto;">
-        <div
-          v-for="(question, index) in questions"
-          :key="question.id"
-          :class="['card-item', {
-            'answered': userAnswers[question.id],
-            'current': index === currentIndex
-          }]"
-          @click="goToQuestion(index)"
-        >
-          {{ index + 1 }}
+    <!-- 退出确认 -->
+    <BaseModal
+      :open="exitOpen"
+      title="退出考试"
+      subtitle="当前答题记录将不会保存"
+      @close="exitOpen = false"
+    >
+      <div class="submit-info">
+        <div class="submit-icon danger"><AppIcon name="warning" :size="22" /></div>
+        <div>
+          <strong>确定要退出吗？</strong>
+          <p>本次考试会被作废，不会计入成绩统计。</p>
         </div>
       </div>
-    </el-dialog>
-    </div>
+      <template #footer>
+        <button class="btn btn-ghost" @click="exitOpen = false">继续考试</button>
+        <button class="btn btn-danger" @click="exitExam">退出并作废</button>
+      </template>
+    </BaseModal>
   </div>
 </template>
 
-<script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { Back, Document, Check, ArrowLeft } from '@element-plus/icons-vue'
-import { useUserStore } from '@/stores/user'
-import { SettingsService, ExamService } from '@/api'
-import type { Question } from '@/types'
-
-// ExamView 扩展的题目类型（含前端计算字段）
-interface ExamQuestion extends Question {
-  hasImage: boolean
-  imageBase64?: string
-}
-
-// 定义 emit
-const emit = defineEmits<{
-  back: []
-}>()
-
-const router = useRouter()
-
-const userStore = useUserStore()
-
-const examID = ref<number>(0)
-const startTime = ref<number>(Date.now())
-const examStarted = ref(false)
-const questions = ref<ExamQuestion[]>([])
-const currentQuestion = ref<ExamQuestion | null>(null)
-const currentIndex = ref(0)
-const totalQuestions = ref(0)
-const userAnswers = ref<Record<number, string>>({})
-const remainingTime = ref(0)
-const timerInterval = ref<number | null>(null)
-const showCardDialog = ref(false)
-const examConfig = ref<any>(null)
-
-// 加载考试配置
-const loadExamConfig = async () => {
-  try {
-    examConfig.value = await SettingsService.GetExamConfig(userStore.currentCategory)
-  } catch (error: any) {
-    console.error('Load exam config error:', error)
-    // 如果加载失败，使用默认配置
-    examConfig.value = {
-      total: 50,
-      time_minutes: 45
-    }
-  }
-}
-
-const formattedTime = computed(() => {
-  const minutes = Math.floor(remainingTime.value / 60)
-  const seconds = remainingTime.value % 60
-  return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
-})
-
-const questionTypeText = computed(() => {
-  if (!currentQuestion.value) return ''
-  return currentQuestion.value.type === 1 ? '单选题' : '多选题'
-})
-
-const options = computed(() => {
-  if (!currentQuestion.value) return []
-  
-  // 单选题和多选题都显示 ABCD 选项
-  return [
-    { key: 'A', text: currentQuestion.value.A },
-    { key: 'B', text: currentQuestion.value.B },
-    { key: 'C', text: currentQuestion.value.C },
-    { key: 'D', text: currentQuestion.value.D }
-  ]
-})
-
-const loadExam = async () => {
-  try {
-    // 调用后端 API 开始考试
-    const result: any = await ExamService.StartExam(userStore.currentCategory)
-    
-    if (!result || !result.questions || result.questions.length === 0) {
-      ElMessage.warning({
-        message: `"${userStore.currentCategory}类考试题库为空，2 秒后返回首页`,
-        duration: 2000
-      })
-      setTimeout(() => {
-        emit('back')
-      }, 2000)
-      return
-    }
-    
-    // 保存考试 ID 和开始时间
-    examID.value = result.exam_id
-    startTime.value = Date.now()
-    
-    // 加载题目
-    questions.value = result.questions as any
-    totalQuestions.value = questions.value.length
-    
-    // 使用配置中的考试时间
-    if (result.config) {
-      remainingTime.value = result.config.time_minutes * 60 // 转换为秒
-    }
-    
-    // 加载第一题
-    if (questions.value.length > 0) {
-      currentQuestion.value = questions.value[0]
-    }
-    
-    // 标记考试已开始
-    examStarted.value = true
-    
-    // 启动计时器
-    startTimer()
-    
-    ElMessage.success('考试已开始，祝你考试顺利！')
-  } catch (error: any) {
-    ElMessage.error(error.message || '加载考试失败')
-    console.error('Load exam error:', error)
-  }
-}
-
-const startExam = async () => {
-  await loadExam()
-}
-
-const startTimer = () => {
-  timerInterval.value = window.setInterval(() => {
-    if (remainingTime.value > 0) {
-      remainingTime.value--
-    } else {
-      confirmSubmit()
-    }
-  }, 1000)
-}
-
-const selectAnswer = (key: string) => {
-  if (!currentQuestion.value) return
-  
-  const questionId = currentQuestion.value.id
-  
-  // 多选题支持选择多个答案
-  if (currentQuestion.value.type === 2) {
-    // 如果是多选题，使用数组存储答案
-    const currentAnswer = userAnswers.value[questionId] || ''
-    if (currentAnswer.includes(key)) {
-      // 如果已选择，取消选择
-      userAnswers.value[questionId] = currentAnswer.replace(key, '').split('').sort().join('')
-    } else {
-      // 如果未选择，添加答案
-      userAnswers.value[questionId] = (currentAnswer + key).split('').sort().join('')
-    }
-  } else {
-    // 单选题直接设置答案
-    userAnswers.value[questionId] = key
-  }
-}
-
-const nextQuestion = () => {
-  if (currentIndex.value < totalQuestions.value - 1) {
-    currentIndex.value++
-    loadQuestion(currentIndex.value)
-  }
-}
-
-const previousQuestion = () => {
-  if (currentIndex.value > 0) {
-    currentIndex.value--
-    loadQuestion(currentIndex.value)
-  }
-}
-
-const loadQuestion = (index: number) => {
-  currentQuestion.value = questions.value[index]
-}
-
-const goToQuestion = (index: number) => {
-  currentIndex.value = index
-  loadQuestion(index)
-  showCardDialog.value = false
-}
-
-const goBack = () => {
-  emit('back')
-}
-
-const confirmExit = async () => {
-  try {
-    await ElMessageBox.confirm('确定要退出考试吗？当前答题记录将不会保存', '提示', {
-      confirmButtonText: '确定',
-      cancelButtonText: '取消',
-      type: 'warning'
-    })
-    // ✅ 修复 BUG-002: 退出时作废考试记录
-    if (examID.value) {
-      await ExamService.InvalidateExam(examID.value)
-    }
-    goBack()
-  } catch (error) {
-    // 用户取消退出
-  }
-}
-
-const confirmSubmit = async () => {
-  const answeredCount = Object.keys(userAnswers.value).length
-  const unansweredCount = totalQuestions.value - answeredCount
-  
-  if (unansweredCount > 0) {
-    try {
-      await ElMessageBox.confirm(
-        `还有 ${unansweredCount} 道题未作答，确定要交卷吗？`,
-        '提示',
-        {
-          confirmButtonText: '确定',
-          cancelButtonText: '取消',
-          type: 'warning'
-        }
-      )
-    } catch {
-      return
-    }
-  }
-  
-  submitExam()
-}
-
-const submitExam = async () => {
-  try {
-    if (examID.value === 0) {
-      ElMessage.error('考试未开始，无法提交')
-      return
-    }
-    
-    // 调用后端 API 提交考试
-    await ExamService.SubmitExam(examID.value, userAnswers.value, startTime.value)
-    
-    ElMessage.success('考试已提交')
-    if (timerInterval.value) {
-      clearInterval(timerInterval.value)
-    }
-    
-    // 跳转到考试结果页面，并传递考试 ID
-    router.push({ path: '/exam-result', query: { examId: examID.value.toString() } })
-  } catch (error: any) {
-    ElMessage.error(error.message || '提交考试失败')
-    console.error('Submit exam error:', error)
-  }
-}
-
-onMounted(() => {
-  loadExamConfig() // 只加载考试配置，不立即开始考试
-})
-
-onUnmounted(() => {
-  if (timerInterval.value) {
-    clearInterval(timerInterval.value)
-  }
-})
-</script>
-
 <style scoped>
-.exam-container {
-  padding: 20px;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
+.exam-page {
+  max-width: 1240px;
 }
-
-/* 考试前确认界面 */
-.exam-confirm {
-  display: flex;
-  justify-content: center;
+.back-btn {
+  display: inline-flex;
   align-items: center;
-  height: 100%;
-  background: #f5f7fa;
-}
-
-.confirm-card {
-  background: white;
-  padding: 30px 50px 50px;
-  border-radius: 20px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
-  text-align: center;
-  min-width: 600px;
-  position: relative;
-}
-
-.back-button {
-  position: absolute;
-  top: 20px;
-  left: 20px;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  cursor: pointer;
-  color: #666;
-  padding: 10px;
-  border-radius: 5px;
-  transition: all 0.3s;
-}
-
-.back-button:hover {
-  background: #e6e6e6;
-  color: #409EFF;
-}
-
-.main-title {
-  font-size: 32px;
-  color: #409EFF;
-  margin-bottom: 10px;
-  font-weight: bold;
-  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.1);
-}
-
-.sub-title {
-  font-size: 28px;
-  color: #409EFF;
+  gap: 6px;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-3);
+  background: var(--surface);
+  border: 1px solid var(--line);
   margin-bottom: 20px;
-  font-weight: bold;
+}
+.back-btn:hover {
+  color: var(--ink);
 }
 
-.category-letter {
-  font-size: 80px;
-  font-weight: bold;
-  color: #E6A23C;
-  margin: 20px 0;
-  text-shadow: 3px 3px 6px rgba(0, 0, 0, 0.15);
+.intro {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 20px;
+  padding: 38px 42px;
+  border-radius: 26px;
+  border: 1px solid var(--line);
+  background: linear-gradient(135deg, var(--cat-soft) 0%, var(--surface) 55%);
+  position: relative;
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
 }
-
-.exam-details {
-  margin: 30px 0;
-  font-size: 18px;
-  line-height: 2;
-  color: #606266;
+.intro-main {
+  position: relative;
+  z-index: 2;
 }
-
-.detail-line {
-  margin: 8px 0;
+.intro h1 {
+  margin-top: 12px;
+  font-size: 44px;
+  font-weight: 850;
+  letter-spacing: -0.04em;
 }
-
-.highlight {
-  color: #E6A23C;
-  font-weight: bold;
-  font-size: 20px;
+.intro > .intro-main > p {
+  margin-top: 12px;
+  font-size: 14px;
+  line-height: 1.8;
+  color: var(--ink-3);
+  max-width: 560px;
 }
-
-.highlight-red {
-  color: #f56c6c;
-  font-weight: bold;
-  font-size: 20px;
+.intro-config {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 10px;
+  margin: 28px 0;
+  max-width: 640px;
 }
-
-.start-button-area {
-  margin-top: 40px;
-}
-
-.start-button-area .el-button {
-  width: 200px;
-  height: 50px;
-  font-size: 20px;
-  font-weight: bold;
-  background: linear-gradient(135deg, #66b1ff 0%, #409eff 100%);
-  border: none;
-  box-shadow: 0 4px 12px rgba(64, 158, 255, 0.3);
-}
-
-.start-button-area .el-button:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 16px rgba(64, 158, 255, 0.4);
-}
-
-/* 考试界面 */
-.exam-interface {
-  height: 100%;
+.cfg {
+  padding: 13px 14px;
+  border-radius: 13px;
+  background: rgba(255, 253, 248, 0.78);
+  border: 1px solid var(--line);
   display: flex;
   flex-direction: column;
+  gap: 3px;
+}
+.cfg strong {
+  font-size: 21px;
+  font-weight: 850;
+  letter-spacing: -0.03em;
+}
+.cfg strong small {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--ink-3);
+  margin-left: 1px;
+}
+.cfg span {
+  font-size: 10px;
+  color: var(--ink-3);
+}
+.cfg.accent {
+  background: var(--cat-soft);
+  border-color: transparent;
+}
+.cfg.accent strong {
+  color: var(--cat-ink);
+}
+.rules {
+  list-style: none;
+  margin: 0 0 26px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.rules li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.rules :deep(svg) {
+  color: var(--cat);
+}
+.intro-error {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  background: var(--red-soft);
+  color: #a63b2e;
+  padding: 12px 14px;
+  border-radius: 12px;
+  font-size: 12.5px;
+  margin-bottom: 18px;
+  max-width: 640px;
+}
+.intro-error div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.intro-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.intro-hint {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.intro-art {
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+.intro-art svg {
+  width: 330px;
+  height: 330px;
+}
+.intro-letter {
+  position: absolute;
+  font-size: 190px;
+  font-weight: 900;
+  line-height: 1;
+  color: var(--cat);
+  opacity: 0.1;
+  letter-spacing: -0.08em;
 }
 
-.header {
-  flex-shrink: 0;
+.exam-bar {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 12px 18px;
+  border-radius: 16px;
+  margin-bottom: 8px;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  backdrop-filter: blur(14px);
+}
+.back-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  color: var(--ink-3);
+}
+.back-icon:hover {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+.exam-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13.5px;
+}
+.exam-title strong {
+  font-weight: 750;
+}
+.exam-progress {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+.exam-progress b {
+  color: var(--ink);
+}
+.exam-progress .progress {
+  height: 6px;
+}
+.timer-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 38px;
+  padding: 0 15px;
+  border-radius: 11px;
+  background: var(--navy);
+  color: #f4f0e6;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  transition: background 0.2s;
+}
+.timer-pill.danger {
+  background: var(--red);
+  animation: blink 1.2s infinite;
+}
+@keyframes blink {
+  50% { opacity: 0.72; }
+}
+.exam-actions {
+  display: flex;
+  gap: 8px;
+}
+.time-track {
+  height: 3px;
+  border-radius: 99px;
+  background: var(--surface-3);
+  overflow: hidden;
+  margin-bottom: 18px;
+}
+.time-track span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--teal), #58bcae);
+  transition: width 0.5s linear;
+}
+.time-track span.danger {
+  background: linear-gradient(90deg, #d05c4d, #f08a7d);
+}
+
+.exam-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 20px;
+  align-items: start;
+}
+.q-card {
+  padding: 28px 32px 24px;
+}
+.q-top {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  margin-bottom: 18px;
+}
+.q-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.q-index {
+  font-size: 11px;
+  color: var(--muted);
+}
+.q-code {
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 0.06em;
+}
+.q-stem {
+  font-size: 21px;
+  line-height: 1.65;
+  font-weight: 700;
+  letter-spacing: -0.01em;
   margin-bottom: 20px;
-  background: white;
-  padding: 15px 30px;
-  border-radius: 10px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
 }
-
-.back-btn {
+.q-image {
+  margin-bottom: 20px;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: var(--navy);
+}
+.q-image img {
+  width: 100%;
+  max-height: 320px;
+  object-fit: contain;
+}
+.q-actions {
   display: flex;
   align-items: center;
-  gap: 5px;
-  cursor: pointer;
-  padding: 8px 15px;
-  border-radius: 5px;
-  color: #606266;
-  font-size: 14px;
-  transition: all 0.3s;
-}
-
-.back-btn:hover {
-  background: #f5f7fa;
-  color: #409EFF;
-}
-
-.info-text {
-  display: flex;
-  gap: 30px;
-  font-size: 18px;
-  font-weight: 600;
-  align-items: center;
-}
-
-.total-questions {
-  color: #409EFF;
-}
-
-.exam-time {
-  color: #67c23a;
-}
-
-.timer {
-  color: #f56c6c;
-}
-
-.action-buttons {
-  display: flex;
   gap: 10px;
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
 }
 
-.question-area {
-  flex: 1;
-  overflow-y: auto;
-  background: white;
-  border-radius: 10px;
-  padding: 30px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
-  margin-bottom: 0;
-}
-
-.question-content-wrapper {
-  min-height: 100%;
-}
-
-.question-text {
-  font-size: 18px;
-  line-height: 1.8;
-  color: #333;
-  margin-bottom: 20px;
-}
-
-.question-number {
-  font-weight: 600;
-  margin-right: 10px;
-}
-
-.question-type {
-  color: #666;
-  margin-right: 10px;
-}
-
-.question-image {
-  text-align: center;
-  margin: 20px 0;
-}
-
-.question-image img {
-  max-width: 100%;
-  max-height: 400px;
-  border-radius: 5px;
-}
-
-.options-area {
-  flex: 1;
+.exam-side {
   display: flex;
   flex-direction: column;
-  gap: 15px;
-  margin: 20px 0;
+  gap: 14px;
+  position: sticky;
+  top: 78px;
 }
-
-.option-item {
+.side-card {
+  padding: 20px;
+}
+.side-timer {
   display: flex;
-  align-items: flex-start;
-  padding: 15px 20px;
-  border: 2px solid #e6e6e6;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.3s;
-}
-
-.option-item:hover {
-  border-color: #409EFF;
-  background: #f0f9ff;
-}
-
-.option-item.selected {
-  border-color: #409EFF;
-  background: #ecf5ff;
-}
-
-.option-key {
-  font-weight: 600;
-  margin-right: 10px;
-  color: #409EFF;
-}
-
-.option-text {
-  flex: 1;
-  font-size: 16px;
-  line-height: 1.6;
-  color: #333;
-}
-
-.bottom-navigation-fixed {
-  position: fixed;
-  bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  gap: 20px;
-  padding: 20px 40px;
-  background: transparent;
-  z-index: 100;
-}
-
-.answer-card {
-  display: grid;
-  grid-template-columns: repeat(10, 1fr);
-  gap: 12px;
-  padding: 15px;
-  scrollbar-width: none !important;
-  -ms-overflow-style: none !important;
-}
-
-.answer-card::-webkit-scrollbar {
-  display: none !important;
-  width: 0 !important;
-  height: 0 !important;
-}
-
-.card-item {
-  width: 50px;
-  height: 50px;
-  display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  border: 2px solid #e6e6e6;
-  border-radius: 5px;
-  cursor: pointer;
-  font-weight: 600;
-  transition: all 0.3s;
+  gap: 4px;
+  padding: 14px;
+  border-radius: 14px;
+  background: var(--surface-2);
+}
+.side-timer span {
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+.side-timer em {
+  font-style: normal;
+  font-size: 10px;
+  color: var(--ink-3);
+}
+.side-timer.danger {
+  background: var(--red-soft);
+  color: #a63b2e;
+}
+.side-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-top: 12px;
+}
+.side-stats div {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 4px;
+  border-radius: 9px;
+  background: var(--surface-2);
+}
+.side-stats strong {
+  font-size: 14px;
+  font-weight: 800;
+}
+.side-stats span {
+  font-size: 9.5px;
+  color: var(--ink-3);
+}
+.side-title {
+  font-size: 13px;
+  font-weight: 750;
+  margin-bottom: 10px;
+}
+.mini-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 5px;
+}
+.mini-cell {
+  aspect-ratio: 1;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  font-size: 9.5px;
+  font-weight: 650;
+  color: var(--ink-3);
+  transition: all 0.12s;
+}
+.mini-cell.answered {
+  background: var(--teal-soft);
+  border-color: rgba(42, 157, 143, 0.35);
+  color: #147065;
+}
+.mini-cell.current {
+  border-color: var(--amber);
+  box-shadow: 0 0 0 2px rgba(232, 163, 61, 0.2);
+}
+.legend {
+  display: flex;
+  gap: 12px;
+  margin-top: 12px;
+  font-size: 9.5px;
+  color: var(--ink-3);
+}
+.legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.lg {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+}
+.lg.answered { background: var(--teal-soft); border-color: rgba(42, 157, 143, 0.35); }
+.lg.current { border-color: var(--amber); background: #fff; }
+
+.nav-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(42px, 1fr));
+  gap: 8px;
+}
+.nav-cell {
+  height: 40px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  font-size: 11.5px;
+  font-weight: 650;
+  color: var(--ink-2);
+}
+.nav-cell.answered {
+  background: var(--teal-soft);
+  border-color: rgba(42, 157, 143, 0.35);
+  color: #147065;
+}
+.nav-cell.current {
+  border-color: var(--amber);
+  box-shadow: 0 0 0 3px rgba(232, 163, 61, 0.16);
 }
 
-.card-item:hover {
-  border-color: #409EFF;
-  background: #f0f9ff;
+.submit-info {
+  display: flex;
+  gap: 15px;
+}
+.submit-icon {
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
+  background: var(--amber-soft);
+  color: #9a6514;
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+.submit-icon.danger {
+  background: var(--red-soft);
+  color: #a63b2e;
+}
+.submit-info strong {
+  font-size: 13.5px;
+  font-weight: 700;
+}
+.submit-info p {
+  margin-top: 5px;
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--ink-3);
+}
+.submit-warn {
+  margin-top: 10px;
+  padding: 8px 11px;
+  border-radius: 9px;
+  background: var(--red-soft);
+  font-size: 11.5px;
+  color: #a63b2e;
 }
 
-.card-item.answered {
-  border-color: #67c23a;
-  background: #f0f9eb;
-  color: #67c23a;
-}
-
-.card-item.current {
-  border-color: #409EFF;
-  background: #ecf5ff;
+@media (max-width: 1180px) {
+  .intro-grid,
+  .intro {
+    grid-template-columns: 1fr;
+  }
+  .intro-art {
+    display: none;
+  }
+  .exam-grid {
+    grid-template-columns: 1fr;
+  }
+  .exam-side {
+    position: static;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+  .exam-side > .btn {
+    grid-column: span 2;
+  }
 }
 </style>

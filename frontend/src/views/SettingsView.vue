@@ -1,1217 +1,1469 @@
+<script setup lang="ts">
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { useRouter } from "vue-router";
+import { api, usingMock } from "@/api";
+import { useSessionStore } from "@/stores/session";
+import { useBankStore } from "@/stores/bank";
+import { useToastStore } from "@/stores/toast";
+import type {
+  AppInfo,
+  AppUpdateProgress,
+  AppUpdateStatus,
+  BankUpdateSettings,
+  BankUpdateStatus,
+  DBStats,
+  ImportProgress,
+  ImportResult,
+} from "@/types";
+import AppIcon from "@/components/AppIcon.vue";
+import ConfirmDialog from "@/components/ConfirmDialog.vue";
+
+const router = useRouter();
+const session = useSessionStore();
+const bank = useBankStore();
+const toast = useToastStore();
+
+const info = ref<AppInfo | null>(null);
+const stats = ref<DBStats | null>(null);
+
+const dragging = ref(false);
+const pendingPath = ref("");
+const confirmImportOpen = ref(false);
+const importing = ref(false);
+const progress = ref<ImportProgress | null>(null);
+const lastResult = ref<ImportResult | null>(null);
+
+const clearUserOpen = ref(false);
+const clearBankOpen = ref(false);
+const clearingUser = ref(false);
+const clearingBank = ref(false);
+
+const updateStatus = ref<BankUpdateStatus | null>(null);
+const updateSettings = ref<BankUpdateSettings>({ autoCheck: true, autoImport: false });
+const checking = ref(false);
+const applyingUpdate = ref(false);
+const updateError = ref("");
+const confirmUpdateOpen = ref(false);
+
+const appUpdate = ref<AppUpdateStatus | null>(null);
+const appChecking = ref(false);
+const appDownloading = ref(false);
+const appUpdateError = ref("");
+const appProgress = ref<AppUpdateProgress | null>(null);
+const appInstallOpen = ref(false);
+const appInstalling = ref(false);
+
+let offProgress: (() => void) | null = null;
+let offDrop: (() => void) | null = null;
+let offUpdateStatus: (() => void) | null = null;
+let offAppUpdateStatus: (() => void) | null = null;
+let offAppUpdateProgress: (() => void) | null = null;
+
+const stageLabel = computed(() => progress.value?.message ?? "准备导入…");
+const progressPercent = computed(() => progress.value?.percent ?? 0);
+
+const resultStats = computed(() => {
+  if (!lastResult.value) return [];
+  const s = lastResult.value.stats ?? {};
+  return [
+    { label: "单选题", value: s.single ?? 0, tone: "amber" },
+    { label: "多选题", value: s.multiple ?? 0, tone: "teal" },
+    { label: "A 类", value: s.categoryA ?? 0, tone: "amber" },
+    { label: "B 类", value: s.categoryB ?? 0, tone: "teal" },
+    { label: "C 类", value: s.categoryC ?? 0, tone: "blue" },
+    { label: "带图题", value: s.withImage ?? 0, tone: "blue" },
+  ];
+});
+
+async function loadMeta() {
+  try {
+    const [i, s] = await Promise.all([api.getAppInfo(), api.getDBStats()]);
+    info.value = i;
+    stats.value = s;
+  } catch (e: any) {
+    toast.error("读取应用信息失败", e?.message);
+  }
+}
+
+async function loadStats() {
+  try {
+    stats.value = await api.getDBStats();
+  } catch {
+    /* ignore */
+  }
+}
+
+async function loadUpdate() {
+  try {
+    const [st, settings] = await Promise.all([
+      api.getBankUpdateStatus(),
+      api.getBankUpdateSettings(),
+    ]);
+    updateStatus.value = st;
+    updateSettings.value = settings;
+  } catch {
+    /* ignore */
+  }
+}
+
+async function saveUpdateSettings(next: BankUpdateSettings) {
+  updateSettings.value = next;
+  try {
+    await api.setBankAutoUpdate(next.autoCheck, next.autoImport);
+  } catch (e: any) {
+    toast.error("保存更新设置失败", e?.message);
+    await loadUpdate();
+  }
+}
+
+function toggleAutoCheck() {
+  const next = {
+    ...updateSettings.value,
+    autoCheck: !updateSettings.value.autoCheck,
+  };
+  if (!next.autoCheck) next.autoImport = false;
+  saveUpdateSettings(next);
+}
+
+function toggleAutoImport() {
+  if (!updateSettings.value.autoCheck) return;
+  saveUpdateSettings({
+    ...updateSettings.value,
+    autoImport: !updateSettings.value.autoImport,
+  });
+}
+
+async function checkUpdate() {
+  if (checking.value || applyingUpdate.value) return;
+  checking.value = true;
+  updateError.value = "";
+  try {
+    updateStatus.value = await api.checkBankUpdate();
+    if (updateStatus.value.available) {
+      toast.warning("发现新题库", updateStatus.value.remoteVersion || "可立即更新");
+    } else {
+      toast.success("已是最新题库");
+    }
+  } catch (e: any) {
+    updateError.value = e?.message || "检查更新失败";
+    toast.error("检查更新失败", updateError.value);
+  } finally {
+    checking.value = false;
+  }
+}
+
+function askApplyUpdate() {
+  if (applyingUpdate.value) return;
+  confirmUpdateOpen.value = true;
+}
+
+async function applyUpdate() {
+  confirmUpdateOpen.value = false;
+  applyingUpdate.value = true;
+  updateError.value = "";
+  try {
+    const result = await api.applyBankUpdate();
+    lastResult.value = result;
+    bank.invalidate();
+    await loadStats();
+    updateStatus.value = await api.getBankUpdateStatus();
+    toast.success("题库已更新", result.message);
+  } catch (e: any) {
+    updateError.value = e?.message || "更新失败";
+    toast.error("题库更新失败", updateError.value);
+  } finally {
+    applyingUpdate.value = false;
+  }
+}
+
+async function loadAppUpdate() {
+  try {
+    appUpdate.value = await api.getAppUpdateStatus();
+  } catch {
+    /* ignore */
+  }
+}
+
+async function checkAppUpdate() {
+  if (appChecking.value || appDownloading.value) return;
+  appChecking.value = true;
+  appUpdateError.value = "";
+  try {
+    appUpdate.value = await api.checkAppUpdate();
+    if (appUpdate.value.available) {
+      toast.warning(
+        "发现应用新版本",
+        appUpdate.value.latestVersion || appUpdate.value.releaseName || "可立即下载",
+      );
+    } else {
+      toast.success("应用已是最新版本", appUpdate.value.message);
+    }
+  } catch (e: any) {
+    appUpdateError.value = e?.message || "检查应用更新失败";
+    toast.error("检查应用更新失败", appUpdateError.value);
+    await loadAppUpdate();
+  } finally {
+    appChecking.value = false;
+  }
+}
+
+async function downloadAppUpdate() {
+  if (appDownloading.value || !appUpdate.value?.asset) return;
+  appDownloading.value = true;
+  appUpdateError.value = "";
+  appProgress.value = { stage: "download", message: "正在下载更新包…", percent: 0 };
+  try {
+    appUpdate.value = await api.downloadAppUpdate();
+    toast.success("更新包下载完成", appUpdate.value.downloadedName || "");
+  } catch (e: any) {
+    appUpdateError.value = e?.message || "下载更新包失败";
+    toast.error("下载更新包失败", appUpdateError.value);
+    await loadAppUpdate();
+  } finally {
+    appDownloading.value = false;
+  }
+}
+
+function askRunInstaller() {
+  if (appInstalling.value) return;
+  appInstallOpen.value = true;
+}
+
+async function runInstaller() {
+  appInstallOpen.value = false;
+  appInstalling.value = true;
+  try {
+    await api.runAppUpdateInstaller();
+    toast.success("安装程序已启动", "请按安装向导完成更新");
+  } catch (e: any) {
+    toast.error("启动安装程序失败", e?.message);
+  } finally {
+    appInstalling.value = false;
+  }
+}
+
+async function openAppRelease() {
+  try {
+    await api.openAppUpdateRelease();
+  } catch (e: any) {
+    toast.error("打开发布页失败", e?.message);
+  }
+}
+
+async function openAppUpdateFolder() {
+  try {
+    await api.openAppUpdateFolder();
+  } catch (e: any) {
+    toast.error("打开下载目录失败", e?.message);
+  }
+}
+
+function fmtDateTime(iso?: string) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleString("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function shortHash(hash?: string) {
+  if (!hash) return "";
+  return hash.slice(0, 12) + "…";
+}
+
+function fmtSize(bytes?: number) {
+  if (!bytes) return "—";
+  return (bytes / 1024 / 1024).toFixed(1) + " MB";
+}
+
+async function chooseZip() {
+  if (importing.value) return;
+  try {
+    const path = await api.pickZipFile();
+    if (path) {
+      pendingPath.value = path;
+      confirmImportOpen.value = true;
+    }
+  } catch (e: any) {
+    toast.error("选择文件失败", e?.message);
+  }
+}
+
+function handleDropped(paths: string[]) {
+  if (importing.value) return;
+  const zip = paths.find((p) => p.toLowerCase().endsWith(".zip"));
+  if (!zip) {
+    toast.warning("只支持 ZIP", "请拖入包含题库 PDF 的 ZIP 压缩包");
+    return;
+  }
+  pendingPath.value = zip;
+  confirmImportOpen.value = true;
+}
+
+function onHtmlDrop(e: DragEvent) {
+  dragging.value = false;
+  if (!usingMock) return; // 桌面端由 Wails 原生拖放事件处理
+  const file = e.dataTransfer?.files?.[0];
+  if (!file) return;
+  if (!file.name.toLowerCase().endsWith(".zip")) {
+    toast.warning("只支持 ZIP", "请拖入 ZIP 题库包");
+    return;
+  }
+  pendingPath.value = file.name;
+  confirmImportOpen.value = true;
+}
+
+async function runImport() {
+  if (!pendingPath.value) return;
+  confirmImportOpen.value = false;
+  importing.value = true;
+  lastResult.value = null;
+  progress.value = { stage: "start", message: "开始导入…", percent: 2 };
+  try {
+    const result = await api.importZip(pendingPath.value);
+    lastResult.value = result;
+    if (result.success) {
+      bank.invalidate();
+      toast.success("题库导入完成", result.message);
+      await loadStats();
+    } else {
+      toast.error("导入失败", result.message);
+    }
+  } catch (e: any) {
+    toast.error("导入失败", e?.message || "请检查 ZIP 内容");
+  } finally {
+    importing.value = false;
+    pendingPath.value = "";
+  }
+}
+
+async function clearUserData() {
+  if (!session.user) return;
+  clearingUser.value = true;
+  try {
+    await api.clearUserData(session.user.id);
+    bank.invalidate();
+    clearUserOpen.value = false;
+    toast.success("学习数据已清空", "题库与考试历史快照保留");
+    await loadStats();
+  } catch (e: any) {
+    toast.error("清空失败", e?.message);
+  } finally {
+    clearingUser.value = false;
+  }
+}
+
+async function clearBank() {
+  clearingBank.value = true;
+  try {
+    await api.clearQuestionBank();
+    bank.invalidate();
+    clearBankOpen.value = false;
+    toast.success("题库已清空", "已交卷的考试复盘仍可查看");
+    await loadStats();
+  } catch (e: any) {
+    toast.error("清空失败", e?.message);
+  } finally {
+    clearingBank.value = false;
+  }
+}
+
+function fileName(path: string) {
+  return path.split(/[/\\]/).pop() || path;
+}
+
+onMounted(() => {
+  loadMeta();
+  loadUpdate();
+  loadAppUpdate();
+  offProgress = api.onImportProgress((p) => {
+    progress.value = p;
+    if (p.stage === "done") {
+      bank.invalidate();
+      loadStats();
+    }
+  });
+  offDrop = api.onFilesDropped(handleDropped);
+  offUpdateStatus = api.onBankUpdateStatus((st) => {
+    const before = updateStatus.value?.message;
+    updateStatus.value = st;
+    updateSettings.value = {
+      autoCheck: st.autoCheck,
+      autoImport: st.autoImport,
+    };
+    if (st.message.includes("已更新") && st.message !== before) {
+      bank.invalidate();
+      loadStats();
+    }
+  });
+  offAppUpdateStatus = api.onAppUpdateStatus((st) => {
+    appUpdate.value = st;
+  });
+  offAppUpdateProgress = api.onAppUpdateProgress((p) => {
+    appProgress.value = p;
+  });
+});
+
+onBeforeUnmount(() => {
+  offProgress?.();
+  offDrop?.();
+  offUpdateStatus?.();
+  offAppUpdateStatus?.();
+  offAppUpdateProgress?.();
+});
+</script>
+
 <template>
-  <div class="settings-container">
-    <!-- 左侧导航菜单 -->
-    <div class="nav-menu">
-      <div
-        v-for="(item, index) in menuItems"
-        :key="index"
-        :class="['nav-item', { active: currentMenu === index }]"
-        @click="switchMenu(index)"
-      >
-        <el-icon :size="20">
-          <component :is="item.icon" />
-        </el-icon>
-        <span>{{ item.name }}</span>
+  <div class="page settings-page">
+    <header class="page-head">
+      <div>
+        <span class="eyebrow">SETTINGS · 设置</span>
+        <h1 class="page-title">设置</h1>
+        <p class="page-sub">导入题库、管理本地数据，查看应用信息。</p>
       </div>
-    </div>
+      <button class="btn btn-ghost" @click="router.push('/home')">
+        <AppIcon name="home" :size="16" />
+        返回总览
+      </button>
+    </header>
 
-    <!-- 右侧内容区域 -->
-    <div class="content-area">
-      <!-- 导入题库 -->
-      <div v-show="currentMenu === 0" class="settings-content no-title">
-        <div class="import-section">
-          <div class="import-area" @dragover.prevent @dragenter.prevent @drop.prevent="handleWailsDrop">
-            <p>拖拽文件到此处，或点击选择文件</p>
-            <el-button type="primary" @click="selectFile">选择文件</el-button>
-            <div class="format-hint">
-              <p>支持格式：JSON、CSV、Excel (.xlsx/.xls) 格式</p>
-              <p>PDF 导入请使用包含 5 个 PDF 文件的 ZIP 包</p>
+    <div class="settings-grid">
+      <div class="stack gap-20">
+        <!-- 题库更新 -->
+        <section class="surface card-pad update-card">
+          <div class="section-head">
+            <div>
+              <h2 class="section-title">题库更新</h2>
+              <p class="section-sub">自动从 CRAC 官方资料页发现最新题库</p>
+            </div>
+            <span class="chip" :class="updateSettings.autoCheck ? 'chip-teal' : 'chip-outline'">
+              {{ updateSettings.autoCheck ? "自动检查已开启" : "自动检查已关闭" }}
+            </span>
+          </div>
+
+          <div class="update-current">
+            <div class="update-icon" :class="{ available: updateStatus?.available }">
+              <AppIcon name="refresh" :size="20" />
+            </div>
+            <div class="update-main">
+              <strong>{{ updateStatus?.currentVersion || "尚未导入题库" }}</strong>
+              <p>
+                来源：{{ updateStatus?.currentSource || "本地文件" }}
+                <span v-if="updateStatus?.currentImportedAt">
+                  · 导入于 {{ fmtDateTime(updateStatus.currentImportedAt) }}
+                </span>
+              </p>
+              <p v-if="updateStatus?.currentHash" class="mono update-hash">
+                SHA-256 {{ shortHash(updateStatus.currentHash) }}
+              </p>
+            </div>
+            <div class="update-actions">
+              <button
+                class="btn btn-sm btn-ghost"
+                :disabled="checking || applyingUpdate"
+                @click="checkUpdate"
+              >
+                <span v-if="checking" class="spinner dark" />
+                <AppIcon v-else name="search" :size="14" />
+                {{ checking ? "检查中…" : "检查更新" }}
+              </button>
+              <button
+                v-if="updateStatus?.available"
+                class="btn btn-sm btn-accent"
+                :disabled="applyingUpdate"
+                @click="askApplyUpdate"
+              >
+                <AppIcon name="download" :size="15" />
+                立即更新
+              </button>
             </div>
           </div>
-          
-          <!-- 导入结果统计表格 -->
-          <div class="import-stats">
-            <div v-if="!showImportStats" class="empty-hint">
-              暂无导入数据，请导入题库后查看统计信息
-            </div>
-            <el-table v-else :data="importStatsData" border style="width: 100%">
-              <el-table-column prop="category" label="分类" width="100" />
-              <el-table-column prop="total" label="总题数" width="100" align="right" />
-              <el-table-column prop="single" label="单选题数" width="100" align="right">
-                <template #default="{ row }">
-                  <span v-if="row.single !== null">{{ row.single }}</span>
-                  <span v-else>-</span>
-                </template>
-              </el-table-column>
-              <el-table-column prop="multiple" label="多选题数" width="100" align="right">
-                <template #default="{ row }">
-                  <span v-if="row.multiple !== null">{{ row.multiple }}</span>
-                  <span v-else>-</span>
-                </template>
-              </el-table-column>
-              <el-table-column prop="withImage" label="含图题数" width="100" align="right">
-                <template #default="{ row }">
-                  <span v-if="row.withImage !== null">{{ row.withImage }}</span>
-                  <span v-else>-</span>
-                </template>
-              </el-table-column>
-            </el-table>
-            
-            <!-- 自定义合计行 -->
-            <div v-if="showImportStats" class="summary-row">
-              <span class="summary-label">总题数：</span>
-              <span class="summary-value">{{ importTotalCount }}</span>
+
+          <div v-if="updateStatus?.available" class="update-available">
+            <AppIcon name="sparkles" :size="16" />
+            <div>
+              <strong>发现新版本：{{ updateStatus.remoteVersion }}</strong>
+              <p>
+                {{ fmtSize(updateStatus.remoteSize) }}
+                <span v-if="updateStatus.remoteModified"> · {{ updateStatus.remoteModified }}</span>
+              </p>
             </div>
           </div>
-        </div>
-      </div>
-
-      <!-- 导入进度悬浮对话框 -->
-      <teleport to="body">
-        <div v-if="showImportProgress" class="import-progress-overlay">
-          <div class="import-progress-dialog">
-            <div class="progress-header">
-              <span class="progress-title">正在导入题库</span>
-              <span class="progress-percent">{{ importProgressPercent }}%</span>
-            </div>
-            <el-progress
-              :percentage="importProgressPercent"
-              :stroke-width="12"
-              striped
-              striped-flow
-              :show-text="false"
-            />
-            <p class="progress-tip">{{ importProgressMessage || '正在处理中，请稍候...' }}</p>
+          <div v-else-if="updateStatus?.checked" class="update-ok">
+            <AppIcon name="check" :size="15" />
+            已是最新题库
           </div>
-        </div>
-      </teleport>
 
-      <!-- 考试统计 -->
-      <div v-show="currentMenu === 1" class="settings-content">
-        <h1 class="content-title">考试统计</h1>
-        
-        <div class="statistics-section">
-          <!-- 选择区域 -->
-          <div class="chart-options">
-            <div class="option-row">
-              <el-radio-group v-model="selectedCategory" size="default">
-                <el-radio-button value="A">A 类</el-radio-button>
-                <el-radio-button value="B">B 类</el-radio-button>
-                <el-radio-button value="C">C 类</el-radio-button>
-              </el-radio-group>
-              
-              <el-radio-group v-model="selectedTimeRange" size="default">
-                <el-radio-button value="7days">近 7 天</el-radio-button>
-                <el-radio-button value="30days">近 30 天</el-radio-button>
-                <el-radio-button value="180days">近半年</el-radio-button>
-              </el-radio-group>
+          <div v-if="updateError || updateStatus?.error" class="update-error">
+            <AppIcon name="warning" :size="14" />
+            {{ updateError || updateStatus?.error }}
+          </div>
+
+          <div v-if="applyingUpdate" class="import-progress">
+            <div class="import-progress-top">
+              <span>{{ progress?.message || "正在下载并更新题库…" }}</span>
+              <strong>{{ progress?.percent || 0 }}%</strong>
+            </div>
+            <div class="progress amber">
+              <span :style="{ width: (progress?.percent || 0) + '%' }" />
             </div>
           </div>
-          
-          <!-- 分数趋势图 -->
-          <div class="score-trend-container" v-show="showScoreChart">
-            <div ref="scoreChartRef" class="score-chart"></div>
-          </div>
-        </div>
-      </div>
 
-      <!-- 数据清理 -->
-      <div v-show="currentMenu === 2" class="settings-content">
-        <h1 class="content-title">数据清理</h1>
-        
-        <div class="clear-section">
-          <el-alert
-            title="警告"
-            description="此操作将清空所选数据，请谨慎选择！"
-            type="warning"
-            :closable="false"
-            show-icon
-          />
-          
-          <div class="clear-options" style="margin: 20px 0;">
-            <el-checkbox-group v-model="clearOptions" style="display: flex; flex-direction: column; gap: 15px;">
-              <el-checkbox label="user_data">用户数据（练习进度、错题本、收藏夹）</el-checkbox>
-              <el-checkbox label="practice_progress">练习进度（所有类别的练习进度）</el-checkbox>
-              <el-checkbox label="question_bank">题库数据（所有题目）</el-checkbox>
-            </el-checkbox-group>
+          <div class="update-toggles">
+            <button class="toggle-row" @click="toggleAutoCheck">
+              <span class="toggle" :class="{ on: updateSettings.autoCheck }"><i /></span>
+              <span>
+                <strong>启动时自动检查更新</strong>
+                <em>后台访问 CRAC 官网，不阻塞使用</em>
+              </span>
+            </button>
+            <button
+              class="toggle-row"
+              :class="{ disabled: !updateSettings.autoCheck }"
+              @click="toggleAutoImport"
+            >
+              <span class="toggle" :class="{ on: updateSettings.autoImport }"><i /></span>
+              <span>
+                <strong>发现新题库后自动导入</strong>
+                <em>会替换题库；错题/收藏/进度按 J/P/I 保留</em>
+              </span>
+            </button>
           </div>
-          
-          <div class="action-area">
-            <el-button type="danger" @click="confirmClearData" :disabled="clearOptions.length === 0">
-              <el-icon><Delete /></el-icon>
-              清空选中数据
-            </el-button>
-          </div>
-        </div>
-      </div>
 
-      <!-- 题库管理 -->
-      <div v-if="currentMenu === 3" class="settings-content full-height">
-        <QuestionBankView />
-      </div>
+          <p class="update-note">
+            官方题库可能发布在新页面：程序会同时检查题库页、资料下载栏目与站内搜索，并取最新日期且带 ZIP 附件的版本。
+          </p>
+        </section>
 
-      <!-- 关于 -->
-      <div v-show="currentMenu === 4" class="settings-content">
-        <h1 class="content-title">关于</h1>
-        
-        <div class="about-section">
-          <div class="app-info">
-            <div class="app-logo">
-              <el-icon :size="80" color="#409EFF"><Reading /></el-icon>
+        <!-- 应用更新 -->
+        <section class="surface card-pad app-update-card">
+          <div class="section-head">
+            <div>
+              <h2 class="section-title">应用更新</h2>
+              <p class="section-sub">从 GitHub Release 检查并下载桌面安装包</p>
             </div>
-            <h2>业余无线电模拟考试系统</h2>
-            <p>版本：1.0.0</p>
-            <p>作者：BA4RHH</p>
-            <p class="copyright">Copyright © 2024-2025 BA4RHH. All rights reserved.</p>
+            <span class="chip" :class="appUpdate?.available ? 'chip-amber' : 'chip-teal'">
+              {{ appUpdate?.available ? "有新版本" : "GitHub Release" }}
+            </span>
           </div>
-          
-          <div class="app-description">
-            <h3>系统介绍</h3>
-            <p>本系统用于业余无线电操作技术能力模拟考试，支持 A、B、C 三类题目的练习和考试。</p>
-            <h3>功能特性</h3>
-            <ul>
-              <li>逐题练习模式，支持进度保存</li>
-              <li>全真模拟考试，限时答题</li>
-              <li>错题自动收集，针对性复习</li>
-              <li>题目收藏功能，重点题目重点复习</li>
-              <li>题库管理，支持多种格式导入</li>
-              <li>考试统计分析，学习情况一目了然</li>
+
+          <div class="update-current">
+            <div class="update-icon" :class="{ available: appUpdate?.available }">
+              <AppIcon name="refresh" :size="20" />
+            </div>
+            <div class="update-main">
+              <strong>当前版本 v{{ appUpdate?.currentVersion || info?.version || "3.0.0" }}</strong>
+              <p v-if="appUpdate?.latestVersion">
+                最新版本 {{ appUpdate.latestVersion }}
+                <span v-if="appUpdate.releaseName"> · {{ appUpdate.releaseName }}</span>
+              </p>
+              <p v-else>
+                更新源：github.com/{{ appUpdate?.repo || "dracula-zz-1/crac_exam_go" }}
+              </p>
+              <p v-if="appUpdate?.publishedAt">发布于 {{ fmtDateTime(appUpdate.publishedAt) }}</p>
+              <p v-if="appUpdate?.downloadedName" class="mono update-hash">
+                已下载：{{ appUpdate.downloadedName }}
+              </p>
+            </div>
+            <div class="update-actions app-update-actions">
+              <button
+                class="btn btn-sm btn-ghost"
+                :disabled="appChecking || appDownloading"
+                @click="checkAppUpdate"
+              >
+                <span v-if="appChecking" class="spinner dark" />
+                <AppIcon v-else name="search" :size="14" />
+                {{ appChecking ? "检查中…" : "检查更新" }}
+              </button>
+              <button
+                v-if="appUpdate?.available && appUpdate?.asset"
+                class="btn btn-sm btn-accent"
+                :disabled="appDownloading || appInstalling"
+                @click="downloadAppUpdate"
+              >
+                <span v-if="appDownloading" class="spinner" />
+                <AppIcon v-else name="download" :size="15" />
+                {{ appDownloading ? "下载中…" : "下载更新" }}
+              </button>
+              <button
+                v-if="appUpdate?.downloadedPath"
+                class="btn btn-sm btn-accent"
+                :disabled="appInstalling"
+                @click="askRunInstaller"
+              >
+                <AppIcon name="zap" :size="15" />
+                运行安装
+              </button>
+            </div>
+          </div>
+
+          <div v-if="appUpdate?.available" class="update-available">
+            <AppIcon name="sparkles" :size="16" />
+            <div>
+              <strong>发现应用新版本：{{ appUpdate.latestVersion }}</strong>
+              <p v-if="appUpdate.asset">
+                {{ appUpdate.asset.name }} · {{ fmtSize(appUpdate.asset.size) }}
+              </p>
+              <p v-else>Release 未提供 .exe / .msi 安装包，请打开发布页手动下载。</p>
+            </div>
+          </div>
+          <div v-else-if="appUpdate?.checked" class="update-ok">
+            <AppIcon name="check" :size="15" />
+            {{ appUpdate.message || "已是最新版本" }}
+          </div>
+
+          <div v-if="appUpdateError || appUpdate?.error" class="update-error">
+            <AppIcon name="warning" :size="14" />
+            {{ appUpdateError || appUpdate?.error }}
+          </div>
+
+          <div v-if="appDownloading" class="import-progress">
+            <div class="import-progress-top">
+              <span>{{ appProgress?.message || "正在下载更新包…" }}</span>
+              <strong>{{ appProgress?.percent ?? appUpdate?.downloadPercent ?? 0 }}%</strong>
+            </div>
+            <div class="progress amber">
+              <span
+                :style="{
+                  width: (appProgress?.percent ?? appUpdate?.downloadPercent ?? 0) + '%',
+                }"
+              />
+            </div>
+          </div>
+
+          <div v-if="appUpdate?.notes" class="app-update-notes">{{ appUpdate.notes }}</div>
+
+          <div class="app-update-links">
+            <button class="btn btn-sm btn-ghost" @click="openAppRelease">
+              <AppIcon name="arrowUpRight" :size="14" />
+              打开发布页
+            </button>
+            <button
+              v-if="appUpdate?.downloadedPath"
+              class="btn btn-sm btn-ghost"
+              @click="openAppUpdateFolder"
+            >
+              <AppIcon name="folder" :size="14" />
+              打开下载目录
+            </button>
+          </div>
+
+          <p class="update-note">
+            更新包从 GitHub Release 获取，仅支持 .exe / .msi。运行安装程序前请确认下载来源可信；
+            更新不会删除本地题库与学习数据。
+          </p>
+        </section>
+
+        <!-- 导入题库 -->
+        <section class="surface card-pad">
+          <div class="section-head">
+            <div>
+              <h2 class="section-title">导入题库</h2>
+              <p class="section-sub">仅支持 ZIP；ZIP 内读取 5 份 PDF，使用纯 Go 解析</p>
+            </div>
+            <span class="chip chip-amber">ZIP only</span>
+          </div>
+
+          <div class="import-note">
+            <AppIcon name="info" :size="16" />
+            <div>
+              <strong>ZIP 需包含以下文件</strong>
+              <p>
+                总题库.pdf · 总题库附图标记.pdf · A类题库.pdf · B类题库.pdf · C类题库.pdf
+                <br />
+                文件名包含上述关键字即可，允许放在子目录中。
+              </p>
+            </div>
+          </div>
+
+          <div
+            class="dropzone"
+            :class="{ dragging, disabled: importing }"
+            @dragover.prevent="dragging = true"
+            @dragenter.prevent="dragging = true"
+            @dragleave.prevent="dragging = false"
+            @drop.prevent="onHtmlDrop"
+            @click="chooseZip"
+          >
+            <div class="dropzone-icon">
+              <AppIcon name="upload" :size="28" :stroke-width="1.7" />
+            </div>
+            <strong>{{ importing ? "正在导入题库…" : "把 ZIP 拖到这里，或点击选择文件" }}</strong>
+            <span>导入会替换题库，并按 J/P/I 保留错题、收藏与练习进度</span>
+          </div>
+
+          <div v-if="importing" class="import-progress">
+            <div class="import-progress-top">
+              <span>{{ stageLabel }}</span>
+              <strong>{{ progressPercent }}%</strong>
+            </div>
+            <div class="progress amber">
+              <span :style="{ width: progressPercent + '%' }" />
+            </div>
+          </div>
+
+          <div v-if="lastResult" class="import-result" :class="{ failed: !lastResult.success }">
+            <div class="result-head">
+              <div class="result-icon">
+                <AppIcon :name="lastResult.success ? 'check' : 'warning'" :size="18" :stroke-width="2.3" />
+              </div>
+              <div>
+                <strong>{{ lastResult.message }}</strong>
+                <p v-if="lastResult.success">
+                  耗时 {{ (lastResult.elapsedMs / 1000).toFixed(1) }} 秒
+                  <span v-if="lastResult.duplicateJ"> · 题号 J 重复值 {{ lastResult.duplicateJ }} 个</span>
+                  <span v-if="lastResult.duplicateJpi"> · 跳过 J/P/I 重复题目 {{ lastResult.duplicateJpi }} 道</span>
+                  <span
+                    v-if="
+                      lastResult.preservedFavorites ||
+                      lastResult.preservedErrors ||
+                      lastResult.preservedProgress
+                    "
+                  >
+                    · 保留 收藏 {{ lastResult.preservedFavorites }} / 错题
+                    {{ lastResult.preservedErrors }} / 进度 {{ lastResult.preservedProgress }}
+                  </span>
+                </p>
+              </div>
+            </div>
+
+            <div v-if="lastResult.success" class="result-stats">
+              <div v-for="item in resultStats" :key="item.label" class="result-stat">
+                <strong>{{ item.value }}</strong>
+                <span>{{ item.label }}</span>
+              </div>
+            </div>
+
+            <ul v-if="lastResult.warnings?.length" class="warnings">
+              <li v-for="(w, i) in lastResult.warnings" :key="i">
+                <AppIcon name="warning" :size="13" />
+                {{ w }}
+              </li>
             </ul>
           </div>
-        </div>
+        </section>
+
+        <!-- 数据管理 -->
+        <section class="surface card-pad">
+          <div class="section-head">
+            <div>
+              <h2 class="section-title">数据管理</h2>
+              <p class="section-sub">所有数据保存在本机 SQLite 数据库</p>
+            </div>
+            <button class="btn btn-sm btn-ghost" @click="loadStats">
+              <AppIcon name="refresh" :size="14" />
+              刷新
+            </button>
+          </div>
+
+          <div class="db-stats">
+            <div>
+              <strong>{{ stats?.questions ?? "—" }}</strong>
+              <span>题目</span>
+            </div>
+            <div>
+              <strong>{{ stats?.examRecords ?? "—" }}</strong>
+              <span>考试记录</span>
+            </div>
+            <div>
+              <strong>{{ stats?.errorRecords ?? "—" }}</strong>
+              <span>错题记录</span>
+            </div>
+            <div>
+              <strong>{{ stats?.favorites ?? "—" }}</strong>
+              <span>收藏</span>
+            </div>
+            <div>
+              <strong>{{ stats?.users ?? "—" }}</strong>
+              <span>档案</span>
+            </div>
+          </div>
+
+          <div class="danger-list">
+            <div class="danger-row">
+              <div>
+                <strong>清空我的学习数据</strong>
+                <p>删除当前档案的考试记录、错题本、收藏与练习进度，题库保留。</p>
+              </div>
+              <button class="btn btn-sm btn-danger" @click="clearUserOpen = true">
+                <AppIcon name="trash" :size="14" />
+                清空
+              </button>
+            </div>
+            <div class="danger-row">
+              <div>
+                <strong>清空题库</strong>
+                <p>删除全部题目及依赖的错题、收藏与练习进度；已交卷考试的快照保留。</p>
+              </div>
+              <button class="btn btn-sm btn-danger" @click="clearBankOpen = true">
+                <AppIcon name="trash" :size="14" />
+                清空
+              </button>
+            </div>
+          </div>
+        </section>
       </div>
+
+      <aside class="stack gap-20">
+        <!-- 关于 -->
+        <section class="surface card-pad about-card">
+          <div class="about-mark"><AppIcon name="radio" :size="24" :stroke-width="2" /></div>
+          <h2>{{ info?.name ?? "业余无线电模拟考试" }}</h2>
+          <p class="about-version">
+            v{{ info?.version ?? "3.0.0" }}
+            <span v-if="usingMock" class="chip chip-amber">演示模式</span>
+          </p>
+          <p class="about-desc">{{ info?.description }}</p>
+
+          <div class="about-meta">
+            <div>
+              <span>作者</span>
+              <strong>{{ info?.author ?? "BA4RHH" }}</strong>
+            </div>
+            <div>
+              <span>Go</span>
+              <strong class="mono">{{ info?.goVersion ?? "—" }}</strong>
+            </div>
+          </div>
+
+          <div class="data-dir">
+            <span>数据目录</span>
+            <code>{{ info?.dataDir ?? "—" }}</code>
+          </div>
+
+          <div class="tech-chips">
+            <span class="chip">Wails v3</span>
+            <span class="chip">Go</span>
+            <span class="chip">Vue 3</span>
+            <span class="chip">SQLite</span>
+            <span class="chip">纯 Go PDF</span>
+          </div>
+
+          <p class="copyright">{{ info?.copyright }}</p>
+        </section>
+
+        <section class="surface card-pad tips-card">
+          <h3 class="section-title">小提示</h3>
+          <ul>
+            <li><AppIcon name="check" :size="14" /> 导入前建议先保留原始题库 ZIP</li>
+            <li><AppIcon name="check" :size="14" /> PDF 解析在本地完成，不联网</li>
+            <li><AppIcon name="check" :size="14" /> 导入是原子替换，失败不会破坏旧题库</li>
+            <li><AppIcon name="check" :size="14" /> 题库中重复题号会在结果里提示</li>
+          </ul>
+        </section>
+      </aside>
     </div>
+
+    <ConfirmDialog
+      :open="confirmImportOpen"
+      title="确认导入题库"
+      :message="pendingPath ? `即将导入：${fileName(pendingPath)}\n\n导入会替换现有题库；错题、收藏与练习进度会按 J/P/I 尽量保留（找不到对应题目的条目会丢弃）。已交卷的考试复盘会保留。` : ''"
+      confirm-text="开始导入"
+      danger
+      :loading="false"
+      @cancel="confirmImportOpen = false"
+      @confirm="runImport"
+    >
+      <template #icon><AppIcon name="upload" :size="20" /></template>
+    </ConfirmDialog>
+
+    <ConfirmDialog
+      :open="confirmUpdateOpen"
+      title="更新题库"
+      :message="`将下载并替换为 CRAC 官方最新题库${updateStatus?.remoteVersion ? `：${updateStatus.remoteVersion}` : ''}。\n\n错题、收藏与练习进度会按 J/P/I 尽量保留；已交卷的考试复盘快照保留。`"
+      confirm-text="下载并更新"
+      :loading="applyingUpdate"
+      @cancel="confirmUpdateOpen = false"
+      @confirm="applyUpdate"
+    >
+      <template #icon><AppIcon name="download" :size="20" /></template>
+    </ConfirmDialog>
+
+    <ConfirmDialog
+      :open="appInstallOpen"
+      title="运行应用更新"
+      :message="`即将启动已下载的安装程序${appUpdate?.downloadedName ? `：${appUpdate.downloadedName}` : ''}。\n\n安装过程中应用可能会关闭；本地题库、考试记录与学习数据不会被删除。`"
+      confirm-text="运行安装程序"
+      :loading="appInstalling"
+      @cancel="appInstallOpen = false"
+      @confirm="runInstaller"
+    >
+      <template #icon><AppIcon name="zap" :size="20" /></template>
+    </ConfirmDialog>
+
+    <ConfirmDialog
+      :open="clearUserOpen"
+      title="清空学习数据"
+      message="将删除当前档案的全部考试记录、错题、收藏与练习进度。此操作不可恢复，题库不受影响。"
+      confirm-text="确认清空"
+      danger
+      :loading="clearingUser"
+      @cancel="clearUserOpen = false"
+      @confirm="clearUserData"
+    >
+      <template #icon><AppIcon name="trash" :size="20" /></template>
+    </ConfirmDialog>
+
+    <ConfirmDialog
+      :open="clearBankOpen"
+      title="清空题库"
+      message="将删除全部题目，以及所有错题、收藏与练习进度。已交卷考试的历史快照会保留，但题库需要重新导入。此操作不可恢复。"
+      confirm-text="确认清空"
+      danger
+      :loading="clearingBank"
+      @cancel="clearBankOpen = false"
+      @confirm="clearBank"
+    >
+      <template #icon><AppIcon name="trash" :size="20" /></template>
+    </ConfirmDialog>
   </div>
 </template>
 
-<script setup lang="ts">
-import { ref, nextTick, onMounted, onUnmounted, watch } from 'vue'
-import { useUserStore } from '@/stores/user'
-import { SettingsService, StatisticsService, PracticeService } from '@/api'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { Delete, Reading } from '@element-plus/icons-vue'
-import * as echarts from 'echarts'
-import QuestionBankView from './QuestionBankView.vue'
-
-import { ProcessUnifiedData, ProcessFileContent } from '@wailsjs/go/services/ImportService'
-
-import { OnFileDrop, OnFileDropOff } from '@wailsjs/runtime/runtime'
-
-const emit = defineEmits<{
-  dataCleared: []
-}>()
-
-const userStore = useUserStore()
-
-const currentMenu = ref(0)
-const clearOptions = ref<string[]>(['user_data'])
-
-// 导入结果统计
-const showImportStats = ref(false)
-const importStatsData = ref<any[]>([])
-
-// 导入进度悬浮窗
-const showImportProgress = ref(false)
-const importProgressPercent = ref(0)
-const importProgressMessage = ref('')
-
-// 监听后端发送的导入进度事件
-let unlistenProgress: (() => void) | null = null
-
-const setupProgressListener = () => {
-  import('@wailsjs/runtime/runtime').then((runtime) => {
-    unlistenProgress = runtime.EventsOn('import-progress', (data: any) => {
-      if (data && typeof data.percent === 'number') {
-        showImportProgress.value = true
-        importProgressPercent.value = data.percent
-        if (data.message) {
-          importProgressMessage.value = data.message
-        }
-      }
-    })
-  })
-}
-
-const hideProgress = () => {
-  showImportProgress.value = false
-  importProgressPercent.value = 0
-  importProgressMessage.value = ''
-}
-
-// 考试统计相关
-const selectedCategory = ref<string>('A')
-const selectedTimeRange = ref<string>('7days')
-const showScoreChart = ref(false)
-const scoreChartRef = ref<HTMLElement | null>(null)
-let scoreChart: echarts.ECharts | null = null
-
-const menuItems = [
-  { name: '导入题库', icon: 'Upload' },
-  { name: '考试统计', icon: 'TrendCharts' },
-  { name: '数据清理', icon: 'Delete' },
-  { name: '题库管理', icon: 'Document' },
-  { name: '关于', icon: 'InfoFilled' }
-]
-
-const switchMenu = async (index: number) => {
-  currentMenu.value = index
-  
-  // 如果切换到考试统计，初始化并加载默认数据
-  if (index === 1) {
-    selectedCategory.value = 'A'
-    selectedTimeRange.value = '7days'
-    showScoreChart.value = false
-    await nextTick()
-    generateScoreTrendChart()
-  }
-}
-
-// 注意：需要在全局声明 Wails Go 对象
-declare global {
-  interface Window {
-    go?: any
-  }
-}
-
-const selectFile = async () => {
-  try {
-    // 使用 HTML5 文件选择
-    const input = document.createElement('input')
-    input.type = 'file'
-    input.accept = '.json,.csv,.xlsx,.xls,.zip'
-    
-    input.onchange = async (e: Event) => {
-      const target = e.target as HTMLInputElement
-      const file = target.files?.[0]
-      if (!file) return
-      
-      const fileType = file.name.split('.').pop()?.toLowerCase() || ''
-      
-      try {
-        // 读取文件内容
-        const reader = new FileReader()
-        reader.onload = async (event) => {
-          try {
-            let content: string
-            
-            // 二进制文件使用 base64 编码
-            if (fileType === 'xlsx' || fileType === 'xls' || fileType === 'zip') {
-              const arrayBuffer = event.target?.result as ArrayBuffer
-              // 使用正确的 base64 编码方法
-              const bytes = new Uint8Array(arrayBuffer)
-              let binary = ''
-              for (let i = 0; i < bytes.byteLength; i++) {
-                binary += String.fromCharCode(bytes[i])
-              }
-              content = btoa(binary)
-            } else {
-              // 文本文件直接使用内容
-              content = event.target?.result as string
-            }
-            
-            showImportProgress.value = true
-            
-            try {
-              // 调用后端导入服务（传递文件内容和类型）
-              const result = await ProcessFileContent(content, fileType)
-              
-              if (result && result.success) {
-                setTimeout(() => hideProgress(), 500)
-                ElMessage.success(`导入成功！共导入 ${result.imported_count}/${result.total_count} 道题目`)
-                
-                // 显示统计表格
-                showImportStatsTable(result.stats)
-              } else {
-                hideProgress()
-                ElMessage.error(result?.message || '导入失败')
-              }
-            } catch (importError: any) {
-              hideProgress()
-              ElMessage.error('导入失败：' + importError.message)
-              console.error('Import error:', importError)
-            }
-          } catch (error: any) {
-            hideProgress()
-            ElMessage.error('导入失败：' + error.message)
-            console.error('Import error:', error)
-          }
-        }
-        
-        // 根据文件类型选择读取方式
-        if (fileType === 'xlsx' || fileType === 'xls' || fileType === 'zip') {
-          reader.readAsArrayBuffer(file)
-        } else {
-          reader.readAsText(file)
-        }
-      } catch (error: any) {
-        ElMessage.error('读取文件失败：' + error.message)
-        console.error('File read error:', error)
-      }
-    }
-    
-    input.click()
-  } catch (error: any) {
-    console.error('导入失败:', error)
-    ElMessage.error('导入失败：' + error.message)
-  }
-}
-
-// 处理 Wails 拖拽事件
-const handleWailsDrop = async (event: DragEvent) => {
-  event.preventDefault()
-  console.log('handleWailsDrop 被调用')
-  
-  // 尝试获取文件路径
-  const files = event.dataTransfer?.files
-  if (files && files.length > 0) {
-    const file = files[0]
-    console.log('拖拽的文件:', file.name, file)
-    
-    // 对于本地文件，尝试获取路径
-    const filePath = (file as any).path
-    if (filePath) {
-      console.log('获取到文件路径:', filePath)
-      
-      showImportProgress.value = true
-      
-      try {
-        const result = await ProcessUnifiedData(filePath)
-        
-        if (result && result.success) {
-          setTimeout(() => hideProgress(), 500)
-          console.log('导入结果:', result)
-          ElMessage.success(`导入成功！共导入 ${result.imported_count}/${result.total_count} 道题目`)
-          
-          console.log('result.stats:', result.stats)
-          showImportStatsTable(result.stats)
-        } else {
-          hideProgress()
-          ElMessage.error(result?.message || '导入失败')
-        }
-      } catch (importError: any) {
-        hideProgress()
-        ElMessage.error('导入失败：' + importError.message)
-        console.error('Import error:', importError)
-      }
-    } else {
-      // 没有路径，使用 FileReader 读取内容
-      const fileType = file.name.split('.').pop()?.toLowerCase() || ''
-      
-      try {
-        const reader = new FileReader()
-        reader.onload = async (event) => {
-          try {
-            let content: string
-            
-            if (fileType === 'xlsx' || fileType === 'xls' || fileType === 'zip') {
-              const arrayBuffer = event.target?.result as ArrayBuffer
-              const bytes = new Uint8Array(arrayBuffer)
-              let binary = ''
-              for (let i = 0; i < bytes.byteLength; i++) {
-                binary += String.fromCharCode(bytes[i])
-              }
-              content = btoa(binary)
-            } else {
-              content = event.target?.result as string
-            }
-            
-            showImportProgress.value = true
-            
-            try {
-              const result = await ProcessFileContent(content, fileType)
-              
-              if (result && result.success) {
-                setTimeout(() => hideProgress(), 500)
-                console.log('导入结果:', result)
-                ElMessage.success(`导入成功！共导入 ${result.imported_count}/${result.total_count} 道题目`)
-                
-                console.log('result.stats:', result.stats)
-                showImportStatsTable(result.stats)
-              } else {
-                hideProgress()
-                ElMessage.error(result?.message || '导入失败')
-              }
-            } catch (importError: any) {
-              hideProgress()
-              ElMessage.error('导入失败：' + importError.message)
-              console.error('Import error:', importError)
-            }
-          } catch (error: any) {
-            hideProgress()
-            ElMessage.error('导入失败：' + error.message)
-            console.error('Import error:', error)
-          }
-        }
-        
-        if (fileType === 'xlsx' || fileType === 'xls' || fileType === 'zip') {
-          reader.readAsArrayBuffer(file)
-        } else {
-          reader.readAsText(file)
-        }
-      } catch (error: any) {
-        ElMessage.error('读取文件失败：' + error.message)
-        console.error('File read error:', error)
-      }
-    }
-  }
-}
-
-// 使用 Wails 的 OnFileDrop API 实现真正的拖拽导入（获取真实路径）
-const enableFileDrop = () => {
-  console.log('启用文件拖拽监听器...')
-  // 注册文件拖拽监听器
-  OnFileDrop((_x: number, _y: number, paths: string[]) => {
-    console.log('检测到文件拖拽:', paths)
-    if (paths && paths.length > 0) {
-      const filePath = paths[0]
-      const fileName = filePath.split(/[/\\]/).pop() || ''
-      
-      ElMessage.info(`开始导入文件：${fileName}`)
-      
-      // 直接调用后端导入服务（传递真实文件路径）
-      ProcessUnifiedData(filePath).then(result => {
-        console.log('导入结果:', result)
-        if (result && result.success) {
-          ElMessage.success(`导入成功！共导入 ${result.imported_count}/${result.total_count} 道题目`)
-          
-          console.log('result.stats:', result.stats)
-          // 显示统计表格
-          showImportStatsTable(result.stats)
-        } else {
-          ElMessage.error(result?.message || '导入失败')
-        }
-      }).catch(error => {
-        ElMessage.error('导入失败：' + error.message)
-        console.error('Import error:', error)
-      })
-    }
-  }, false)
-}
-
-// 显示导入统计表格
-const showImportStatsTable = (stats: any) => {
-  console.log('导入统计:', stats)
-  
-  if (!stats) {
-    console.warn('没有统计信息')
-    showImportStats.value = false
-    return
-  }
-  
-  importStatsData.value = [
-    { category: 'A 类', total: stats.a_total || 0, single: stats.a_single || 0, multiple: stats.a_multiple || 0, withImage: stats.a_with_image || 0 },
-    { category: 'B 类', total: stats.b_total || 0, single: stats.b_single || 0, multiple: stats.b_multiple || 0, withImage: stats.b_with_image || 0 },
-    { category: 'C 类', total: stats.c_total || 0, single: stats.c_single || 0, multiple: stats.c_multiple || 0, withImage: stats.c_with_image || 0 }
-  ]
-  
-  // 保存总题数
-  importTotalCount.value = stats.total || 0
-  
-  console.log('统计表格数据:', importStatsData.value)
-  showImportStats.value = true
-}
-
-// 导入总题数
-const importTotalCount = ref(0)
-
-onMounted(() => {
-  // 启用文件拖拽
-  enableFileDrop()
-  // 设置导入进度监听器
-  setupProgressListener()
-})
-
-onUnmounted(() => {
-  // 清理拖拽监听器
-  OnFileDropOff()
-  // 清理进度监听器
-  if (unlistenProgress) {
-    unlistenProgress()
-  }
-})
-
-// 生成考试成绩趋势图
-const generateScoreTrendChart = async () => {
-  try {
-    const userID = userStore.currentUser?.user_id
-    if (!userID) {
-      ElMessage.warning('请先登录')
-      return
-    }
-    
-    // 获取考试数据
-    const examData = await StatisticsService.GetExamData(userID, selectedCategory.value, selectedTimeRange.value)
-    
-    if (!examData || examData.length === 0) {
-      ElMessage.warning('没有找到考试数据')
-      showScoreChart.value = false
-      return
-    }
-    
-    showScoreChart.value = true
-    await nextTick()
-    
-    // 初始化图表
-    if (!scoreChartRef.value) return
-    
-    if (!scoreChart) {
-      scoreChart = echarts.init(scoreChartRef.value)
-    }
-    
-    // 处理数据 - 生成完整日期范围（基于当前时间和所选时间段）
-    const allDates: string[] = []
-    const endDate = new Date()  // 当前时间
-    let daysToSubtract = 0
-    
-    // 根据选择的时间段计算开始日期
-    if (selectedTimeRange.value === '7days') {
-      daysToSubtract = 6  // 近 7 天：从今天往前推 6 天（包括今天共 7 天）
-    } else if (selectedTimeRange.value === '30days') {
-      daysToSubtract = 29  // 近 30 天：从今天往前推 29 天
-    } else if (selectedTimeRange.value === '180days') {
-      daysToSubtract = 179  // 近半年：从今天往前推 179 天
-    }
-    
-    const startDate = new Date()
-    startDate.setDate(startDate.getDate() - daysToSubtract)
-    
-    // 生成从开始到结束的所有日期
-    const currentDate = new Date(startDate)
-    while (currentDate <= endDate) {
-      const dateStr = currentDate.toLocaleDateString('zh-CN', {
-        month: '2-digit',
-        day: '2-digit'
-      })
-      allDates.push(dateStr)
-      currentDate.setDate(currentDate.getDate() + 1)
-    }
-    
-    console.log('日期范围:', {
-      startDate: startDate.toLocaleDateString('zh-CN'),
-      endDate: endDate.toLocaleDateString('zh-CN'),
-      totalDays: allDates.length,
-      allDates: allDates
-    })
-    
-    // 处理数据 - 只处理选中类别的数据
-    const selectedData: { date: string; score: number | null }[] = []
-    
-    // 先按日期整理已有数据（只处理选中的类别）
-    const examDataByDate: Record<string, number | null> = {}
-    examData.forEach((exam: any) => {
-      const date = new Date(exam.exam_date as any).toLocaleDateString('zh-CN', {
-        month: '2-digit',
-        day: '2-digit'
-      })
-      if (exam.category === selectedCategory.value) {
-        examDataByDate[date] = exam.score
-      }
-    })
-    
-    // 为每个日期填充数据（有考试填分数，没有填 null）
-    allDates.forEach(date => {
-      if (examDataByDate[date] !== undefined) {
-        selectedData.push({ date, score: examDataByDate[date] })
-      } else {
-        selectedData.push({ date, score: null })
-      }
-    })
-    
-    // 构建 series - 只显示选中的类别
-    const series = []
-    const categoryColors: Record<string, string> = { A: '#409EFF', B: '#67C23A', C: '#E6A23C' }
-    const categoryNames: Record<string, string> = { A: 'A 类', B: 'B 类', C: 'C 类' }
-    
-    if (selectedData.length > 0) {
-      series.push({
-        name: categoryNames[selectedCategory.value],
-        type: 'line',
-        data: selectedData.map(item => ({
-          value: item.score,
-          date: item.date
-        })),
-        smooth: true,
-        symbol: 'circle',
-        symbolSize: 8,
-        // 确保所有数据点都显示标记，包括只有一个数据点的情况
-        symbolRotate: 0,
-        showAllSymbol: true,
-        itemStyle: {
-          color: categoryColors[selectedCategory.value]
-        },
-        label: {
-          show: (params: any) => params.value !== null,  // 只在有数据时显示标签
-          position: 'top',
-          formatter: '{c}'
-        },
-        connectNulls: false  // 不连接空数据点
-      })
-    }
-    
-    // 设置图表配置
-    const option = {
-      tooltip: {
-        trigger: 'axis',
-        formatter: (params: any) => {
-          const date = params[0].data.date
-          const param = params[0]
-          if (param.value !== null) {
-            return `<div style="font-weight: bold;">${date}</div>
-                    <div style="margin: 5px 0;">${param.marker} ${param.seriesName}: ${param.value}分</div>`
-          } else {
-            return `<div style="font-weight: bold;">${date}</div>
-                    <div style="margin: 5px 0; color: #999;">无考试记录</div>`
-          }
-        }
-      },
-      grid: {
-        left: '3%',
-        right: '4%',
-        bottom: '3%',
-        top: '10%',
-        containLabel: true
-      },
-      xAxis: {
-        type: 'category',
-        boundaryGap: false,
-        data: allDates,  // 使用完整的日期数组
-        axisLabel: {
-          rotate: 45,
-          interval: getLabelInterval(allDates.length),  // 根据天数计算间隔
-          formatter: (value: string) => value
-        }
-      },
-      yAxis: {
-        type: 'value',
-        name: '成绩 (分)',
-        min: 0,
-        max: getCategoryMaxScore(selectedCategory.value),
-        interval: 10
-      },
-      series: series
-    }
-    
-    scoreChart.setOption(option)
-    
-    console.log('图表数据:', {
-      allDates: allDates,
-      totalDates: allDates.length,
-      seriesData: series[0]?.data || []
-    })
-    
-    // 响应式调整
-    window.addEventListener('resize', () => {
-      scoreChart?.resize()
-    })
-  
-  ElMessage.success('统计图表生成成功')
-} catch (error: any) {
-  console.error('生成统计图表失败:', error)
-  ElMessage.error('生成统计图表失败：' + (error.message || '未知错误'))
-}
-}
-
-// 监听选择和时间的变化，自动刷新图表
-watch([selectedCategory, selectedTimeRange], () => {
-  if (currentMenu.value === 1) {
-    generateScoreTrendChart()
-  }
-}, { immediate: false })
-
-// 获取类别最高分
-const getCategoryMaxScore = (category: string): number => {
-  switch (category) {
-    case 'A': return 40
-    case 'B': return 60
-    case 'C': return 90
-    default: return 100
-  }
-}
-
-// 根据总天数计算标签显示间隔，目标是显示大约 7 个标签
-const getLabelInterval = (totalDays: number): number => {
-  if (totalDays <= 7) {
-    return 0  // 7 天以内显示所有标签
-  } else {
-    // 计算间隔，使得显示的标签数约为 7 个
-    // 例如：30 天 -> 间隔 4 -> 显示 8 个标签
-    //      180 天 -> 间隔 25 -> 显示 8 个标签
-    return Math.ceil(totalDays / 7) - 1
-  }
-}
-
-const confirmClearData = async () => {
-  try {
-    if (clearOptions.value.length === 0) {
-      ElMessage.warning('请至少选择一项要清理的数据')
-      return
-    }
-    
-    const clearUserData = clearOptions.value.includes('user_data')
-    const clearPracticeProgress = clearOptions.value.includes('practice_progress')
-    const clearQuestionBank = clearOptions.value.includes('question_bank')
-    
-    let confirmMessage = '确定要清空所选数据吗？此操作不可恢复！'
-    if (clearUserData && clearPracticeProgress && clearQuestionBank) {
-      confirmMessage = '确定要清空用户数据、练习进度和题库数据吗？此操作不可恢复！'
-    } else if (clearUserData && clearPracticeProgress) {
-      confirmMessage = '确定要清空用户数据和练习进度吗？此操作不可恢复！'
-    } else if (clearUserData && clearQuestionBank) {
-      confirmMessage = '确定要清空用户数据和题库数据吗？此操作不可恢复！'
-    } else if (clearPracticeProgress && clearQuestionBank) {
-      confirmMessage = '确定要清空练习进度和题库数据吗？此操作不可恢复！'
-    } else if (clearUserData) {
-      confirmMessage = '确定要清空用户数据（练习进度、错题本、收藏夹）吗？此操作不可恢复！'
-    } else if (clearPracticeProgress) {
-      confirmMessage = '确定要清空练习进度（所有类别的练习进度）吗？此操作不可恢复！'
-    } else if (clearQuestionBank) {
-      confirmMessage = '确定要清空题库数据（所有题目）吗？此操作不可恢复！'
-    }
-    
-    await ElMessageBox.confirm(confirmMessage, '警告', {
-      confirmButtonText: '确定',
-      cancelButtonText: '取消',
-      type: 'warning'
-    })
-    
-    const userID = userStore.currentUser?.user_id
-    if (!userID) {
-      ElMessage.warning('请先登录')
-      return
-    }
-    
-    // 按顺序执行清理操作
-    if (clearQuestionBank) {
-      await SettingsService.ClearQuestionBank()
-    }
-    if (clearPracticeProgress) {
-      await PracticeService.ResetProgress(userID, 'all')
-    }
-    if (clearUserData) {
-      await SettingsService.ClearUserData(userID)
-    }
-    
-    ElMessage.success('数据已清空')
-    clearOptions.value = []
-    emit('dataCleared')
-  } catch (error: any) {
-    if (error !== 'cancel') {
-      ElMessage.error(error.message || '清空失败')
-      console.error('Clear data error:', error)
-    }
-  }
-}
-</script>
-
 <style scoped>
-.settings-container {
+.settings-page {
+  max-width: 1180px;
+}
+.settings-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.8fr);
+  gap: 20px;
+  align-items: start;
+}
+.section-head {
   display: flex;
-  height: 100%;
-  background: #f5f7fa;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 18px;
 }
 
-.nav-menu {
-  width: 200px;
-  background: white;
-  padding: 20px 0;
-  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.05);
-}
-
-.nav-item {
+.update-current {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 15px 25px;
-  cursor: pointer;
-  transition: all 0.3s;
-  color: #666;
-  font-size: 15px;
+  gap: 13px;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
 }
-
-.nav-item:hover {
-  background: #f5f7fa;
-  color: #409EFF;
+.update-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 13px;
+  display: grid;
+  place-items: center;
+  background: var(--surface);
+  color: var(--ink-3);
+  border: 1px solid var(--line);
+  flex: none;
 }
-
-.nav-item.active {
-  background: #ecf5ff;
-  color: #409EFF;
-  border-right: 3px solid #409EFF;
+.update-icon.available {
+  background: var(--amber-soft);
+  color: #9a6514;
+  border-color: transparent;
 }
-
-.content-area {
+.update-main {
   flex: 1;
-  padding: 30px;
-  overflow-y: auto;
+  min-width: 0;
 }
-
-.settings-content {
-  background: white;
-  border-radius: 10px;
-  padding: 15px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.05);
-}
-
-.settings-content.full-height {
-  padding: 0;
-  background: transparent;
-  box-shadow: none;
-}
-
-.content-title {
-  font-size: 24px;
-  color: #333;
-  margin-bottom: 30px;
-  padding-bottom: 15px;
-  border-bottom: 2px solid #f0f0f0;
-}
-
-.settings-content.no-title {
-  padding: 15px;
-}
-
-.settings-content.no-title .content-title {
-  display: none;
-}
-
-.import-section {
-  max-width: 800px;
-}
-
-.import-area {
-  margin-top: 0;
-  padding: 15px 20px;
-  border: 2px dashed #dcdfe6;
-  border-radius: 10px;
-  text-align: center;
-  transition: all 0.3s;
-  height: 200px;
-}
-
-.import-area:hover {
-  border-color: #409EFF;
-  background: #f5f7fa;
-}
-
-.import-area p {
-  margin: 20px 0;
-  color: #666;
-}
-
-.format-hint {
-  margin-top: 20px;
-  padding: 15px;
-  background: #f5f7fa;
-  border-radius: 5px;
+.update-main strong {
   font-size: 13px;
-  color: #666;
+  font-weight: 700;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-
-.format-hint p {
-  margin: 5px 0;
+.update-main p {
+  margin-top: 3px;
+  font-size: 10.5px;
+  color: var(--ink-3);
 }
-
-.import-stats {
-  margin-top: 5px;
-  padding: 20px;
-  background: #fafafa;
+.update-hash {
+  font-size: 9.5px !important;
+  color: var(--muted) !important;
+  overflow-wrap: anywhere;
+}
+.update-actions {
+  display: flex;
+  gap: 6px;
+  flex: none;
+}
+.update-available {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-top: 12px;
+  padding: 11px 13px;
+  border-radius: 11px;
+  background: var(--amber-soft);
+  color: #7a5211;
+}
+.update-available strong {
+  font-size: 12px;
+  font-weight: 700;
+}
+.update-available p {
+  margin-top: 3px;
+  font-size: 10.5px;
+  color: #8a631f;
+}
+.update-ok {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 12px;
+  font-size: 11.5px;
+  color: var(--green);
+}
+.update-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin-top: 12px;
+  padding: 9px 11px;
   border-radius: 10px;
-  min-height: 200px;
+  background: var(--red-soft);
+  color: #a63b2e;
+  font-size: 10.5px;
+  line-height: 1.55;
+}
+.update-toggles {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+}
+.toggle-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 10px 12px;
+  border-radius: 11px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  text-align: left;
+  transition: background 0.15s;
+}
+.toggle-row:hover {
+  background: var(--surface-2);
+}
+.toggle-row.disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+.toggle {
+  width: 34px;
+  height: 20px;
+  border-radius: 99px;
+  background: var(--surface-3);
+  position: relative;
+  flex: none;
+  margin-top: 1px;
+  transition: background 0.16s;
+}
+.toggle i {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(22, 27, 33, 0.2);
+  transition: transform 0.16s var(--ease);
+}
+.toggle.on {
+  background: var(--teal);
+}
+.toggle.on i {
+  transform: translateX(14px);
+}
+.toggle-row strong {
+  display: block;
+  font-size: 11.5px;
+  font-weight: 650;
+}
+.toggle-row em {
+  display: block;
+  margin-top: 2px;
+  font-style: normal;
+  font-size: 10px;
+  color: var(--ink-3);
+}
+.update-note {
+  margin-top: 12px;
+  font-size: 10px;
+  color: var(--muted);
+  line-height: 1.6;
 }
 
-.import-stats h3 {
-  font-size: 18px;
-  color: #333;
-  margin-bottom: 15px;
+.app-update-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  max-width: 260px;
+}
+
+.app-update-notes {
+  margin-top: 12px;
+  max-height: 150px;
+  overflow: auto;
+  white-space: pre-wrap;
+  padding: 11px 13px;
+  border-radius: 11px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  font-size: 10.5px;
+  line-height: 1.65;
+  color: var(--ink-3);
+}
+
+.app-update-links {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+
+.import-note {
+  display: flex;
+  gap: 11px;
+  padding: 13px 15px;
+  border-radius: 12px;
+  background: var(--amber-soft);
+  color: #7a5211;
+  margin-bottom: 16px;
+}
+.import-note strong {
+  font-size: 12px;
+  font-weight: 700;
+}
+.import-note p {
+  margin-top: 4px;
+  font-size: 11.5px;
+  line-height: 1.7;
+  color: #8a631f;
+}
+
+.dropzone {
+  border: 1.5px dashed var(--line-strong);
+  border-radius: 16px;
+  padding: 34px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
   text-align: center;
+  cursor: pointer;
+  background: linear-gradient(180deg, var(--surface-2), var(--surface));
+  transition: all 0.18s var(--ease);
+}
+.dropzone:hover,
+.dropzone.dragging {
+  border-color: var(--amber);
+  background: #fffaf0;
+  transform: translateY(-1px);
+}
+.dropzone.disabled {
+  pointer-events: none;
+  opacity: 0.6;
+}
+.dropzone-icon {
+  width: 58px;
+  height: 58px;
+  border-radius: 18px;
+  display: grid;
+  place-items: center;
+  background: var(--surface);
+  color: var(--amber-deep);
+  box-shadow: var(--shadow-xs);
+  border: 1px solid var(--line);
+  margin-bottom: 4px;
+}
+.dropzone strong {
+  font-size: 13.5px;
+  font-weight: 700;
+}
+.dropzone span {
+  font-size: 11.5px;
+  color: var(--ink-3);
+  line-height: 1.6;
 }
 
-.import-stats .empty-hint {
-  text-align: center;
-  color: #999;
-  padding: 40px 0;
-  font-size: 14px;
+.import-progress {
+  margin-top: 18px;
 }
-
-.import-stats .summary-row {
-  margin-top: 15px;
-  padding: 15px 20px;
-  background: #f5f7fa;
-  border-radius: 5px;
-  text-align: right;
-  font-size: 16px;
-}
-
-.import-stats .summary-label {
-  font-weight: bold;
-  color: #333;
-  margin-right: 10px;
-}
-
-.import-stats .summary-value {
-  font-weight: bold;
-  color: #409EFF;
-  font-size: 18px;
-}
-
-.statistics-section {
-  margin-top: 30px;
-}
-
-.category-chart-container {
-  margin-top: 40px;
-  padding: 30px;
-  background: #fafafa;
-  border-radius: 10px;
-}
-
-.chart-title {
-  font-size: 18px;
-  color: #333;
-  margin-bottom: 20px;
-  text-align: center;
-}
-
-.category-chart {
-  width: 100%;
-  height: 400px;
-}
-
-.stat-card {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  padding: 30px;
-  border-radius: 10px;
-  text-align: center;
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
-}
-
-.stat-card:nth-child(2) {
-  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-  box-shadow: 0 4px 12px rgba(240, 147, 251, 0.3);
-}
-
-.stat-card:nth-child(3) {
-  background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-  box-shadow: 0 4px 12px rgba(79, 172, 254, 0.3);
-}
-
-/* 小型统计卡片 - 减少高度 */
-.stat-card-small {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  padding: 15px 20px;
-  border-radius: 8px;
-  text-align: center;
-  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
-}
-
-.stat-card-small:nth-child(2) {
-  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-  box-shadow: 0 2px 8px rgba(240, 147, 251, 0.3);
-}
-
-.stat-card-small:nth-child(3) {
-  background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-  box-shadow: 0 2px 8px rgba(79, 172, 254, 0.3);
-}
-
-.stat-value {
-  font-size: 48px;
-  font-weight: bold;
-  margin-bottom: 10px;
-}
-
-.stat-label {
-  font-size: 16px;
-  opacity: 0.9;
-}
-
-/* 小型统计数值和标签 */
-.stat-value-small {
-  font-size: 32px;
-  font-weight: bold;
-  margin-bottom: 5px;
-}
-
-.stat-label-small {
-  font-size: 13px;
-  opacity: 0.9;
-}
-
-.progress-section {
-  max-width: 600px;
-}
-
-.progress-card {
-  margin-top: 20px;
-}
-
-.card-header {
+.import-progress-top {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  font-weight: 600;
+  font-size: 11.5px;
+  color: var(--ink-3);
+  margin-bottom: 7px;
+}
+.import-progress-top strong {
+  color: var(--amber-deep);
+}
+.import-progress .progress {
+  height: 9px;
 }
 
-.category-select {
-  margin: 20px 0;
+.import-result {
+  margin-top: 18px;
+  border: 1px solid rgba(77, 155, 106, 0.28);
+  background: var(--green-soft);
+  border-radius: 14px;
+  padding: 15px 16px;
 }
-
-/* 考试统计图表样式 */
-.chart-options {
-  background: #f5f7fa;
-  padding: 20px;
+.import-result.failed {
+  border-color: rgba(208, 92, 77, 0.28);
+  background: var(--red-soft);
+}
+.result-head {
+  display: flex;
+  gap: 11px;
+  align-items: flex-start;
+}
+.result-icon {
+  width: 34px;
+  height: 34px;
   border-radius: 10px;
+  display: grid;
+  place-items: center;
+  background: var(--surface);
+  color: var(--green);
+  flex: none;
+}
+.import-result.failed .result-icon {
+  color: var(--red);
+}
+.result-head strong {
+  font-size: 13px;
+  font-weight: 700;
+}
+.result-head p {
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--ink-3);
+}
+.result-stats {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 7px;
+  margin-top: 13px;
+}
+.result-stat {
+  background: rgba(255, 253, 248, 0.75);
+  border-radius: 9px;
+  padding: 8px 4px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.result-stat strong {
+  font-size: 15px;
+  font-weight: 800;
+}
+.result-stat span {
+  font-size: 9.5px;
+  color: var(--ink-3);
+}
+.warnings {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.warnings li {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  font-size: 10.5px;
+  color: #8a631f;
+  line-height: 1.55;
+}
+
+.db-stats {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
   margin-bottom: 20px;
 }
+.db-stats div {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 12px 6px;
+  border-radius: 11px;
+  background: var(--surface-2);
+}
+.db-stats strong {
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+.db-stats span {
+  font-size: 9.5px;
+  color: var(--ink-3);
+}
 
-.option-row {
+.danger-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.danger-row {
   display: flex;
   align-items: center;
-  gap: 20px;
-  flex-wrap: wrap;
+  gap: 16px;
+  padding: 13px 15px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+.danger-row strong {
+  font-size: 12.5px;
+  font-weight: 700;
+}
+.danger-row p {
+  margin-top: 3px;
+  font-size: 10.5px;
+  color: var(--ink-3);
+  line-height: 1.55;
+}
+.danger-row .btn {
+  margin-left: auto;
+  flex: none;
 }
 
-.score-trend-container {
-  background: white;
-  padding: 20px;
-  border-radius: 10px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
-}
-
-.score-chart {
-  width: 100%;
-  height: 265px;
-  margin-top: 20px;
-}
-
-.category-select .label {
-  margin-right: 15px;
-  font-weight: 500;
-}
-
-.action-area {
-  margin-top: 20px;
-  text-align: right;
-}
-
-.clear-section {
-  max-width: 600px;
-}
-
-.clear-section .action-area {
-  margin-top: 30px;
-}
-
-.question-bank-placeholder {
+.about-card {
   text-align: center;
-  padding: 60px 20px;
 }
-
-.about-section {
-  max-width: 800px;
+.about-mark {
+  width: 54px;
+  height: 54px;
+  border-radius: 17px;
+  margin: 0 auto 14px;
+  display: grid;
+  place-items: center;
+  color: #241703;
+  background: linear-gradient(135deg, #f4c26b, var(--amber));
+  box-shadow: 0 10px 26px rgba(232, 163, 61, 0.28);
 }
-
-.app-info {
-  text-align: center;
-  padding: 40px 20px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  border-radius: 10px;
-  margin-bottom: 30px;
-}
-
-.app-logo {
-  margin-bottom: 20px;
-}
-
-.app-info h2 {
-  font-size: 24px;
-  margin-bottom: 10px;
-}
-
-.app-info p {
-  font-size: 16px;
-  opacity: 0.9;
-  margin: 5px 0;
-}
-
-.copyright {
-  margin-top: 15px;
-  font-size: 14px;
-  opacity: 0.8;
-}
-
-.app-description {
-  padding: 20px;
-  background: #f5f7fa;
-  border-radius: 10px;
-}
-
-.app-description h3 {
+.about-card h2 {
   font-size: 18px;
-  color: #333;
-  margin: 20px 0 10px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
 }
-
-.app-description h3:first-child {
-  margin-top: 0;
-}
-
-.app-description ul {
-  list-style: disc;
-  margin-left: 20px;
-  line-height: 2;
-  color: #666;
-}
-
-/* 导入进度悬浮对话框 */
-.import-progress-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
-  background: rgba(0, 0, 0, 0.5);
+.about-version {
+  margin-top: 5px;
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 9999;
+  gap: 7px;
+  font-size: 11.5px;
+  color: var(--ink-3);
 }
-
-.import-progress-dialog {
-  background: white;
-  border-radius: 12px;
-  padding: 30px 40px;
-  width: 400px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+.about-desc {
+  margin-top: 10px;
+  font-size: 11.5px;
+  line-height: 1.7;
+  color: var(--ink-3);
 }
-
-.progress-header {
+.about-meta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 16px;
+}
+.about-meta div {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px;
+  border-radius: 9px;
+  background: var(--surface-2);
 }
-
-.progress-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: #303133;
+.about-meta span {
+  font-size: 9.5px;
+  color: var(--ink-3);
 }
-
-.progress-percent {
-  font-size: 16px;
-  font-weight: 600;
-  color: #409EFF;
+.about-meta strong {
+  font-size: 11.5px;
+  font-weight: 650;
 }
-
-.progress-tip {
+.data-dir {
   margin-top: 12px;
-  font-size: 12px;
-  color: #909399;
-  text-align: center;
-  margin-bottom: 0;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.data-dir span {
+  font-size: 9.5px;
+  color: var(--ink-3);
+}
+.data-dir code {
+  display: block;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--navy);
+  color: #d8d2c4;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+.tech-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  justify-content: center;
+  margin-top: 16px;
+}
+.copyright {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  font-size: 9.5px;
+  color: var(--muted);
+}
+
+.tips-card ul {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.tips-card li {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 11px;
+  color: var(--ink-3);
+  line-height: 1.55;
+}
+.tips-card li :deep(svg) {
+  color: var(--teal);
+  margin-top: 1px;
+}
+
+@media (max-width: 1180px) {
+  .settings-grid {
+    grid-template-columns: 1fr;
+  }
+  .result-stats {
+    grid-template-columns: repeat(3, 1fr);
+  }
 }
 </style>

@@ -1,0 +1,141 @@
+name: Release Windows
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "要构建的标签（例如 v3.1.0，必须已存在）"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build and publish Windows release
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Resolve version
+        id: version
+        shell: pwsh
+        run: |
+          $raw = "${{ inputs.tag || github.ref_name }}".Trim()
+          $version = $raw
+          if ($version.StartsWith("refs/tags/")) {
+            $version = $version.Substring("refs/tags/".Length)
+          }
+          $version = $version -replace '^[vV]', ''
+          if ($version -notmatch '^\d+\.\d+\.\d+([-.+][0-9A-Za-z.-]+)?$') {
+            throw "Invalid release tag: $raw (expected vX.Y.Z)"
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=v$version" >> $env:GITHUB_OUTPUT
+
+      - name: Install Wails 3
+        shell: pwsh
+        run: |
+          go install github.com/wailsapp/wails/v3/cmd/wails3@v3.1.0
+          $goBin = Join-Path (go env GOPATH) "bin"
+          $goBin | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Sync version metadata
+        run: node tools/setversion.mjs "${{ steps.version.outputs.version }}"
+
+      - name: Run backend tests
+        run: go test ./backend/...
+
+      - name: Build Windows executable
+        env:
+          APP_VERSION: ${{ steps.version.outputs.version }}
+        run: wails3 build
+
+      - name: Install NSIS
+        shell: pwsh
+        continue-on-error: true
+        run: choco install nsis --no-progress -y
+
+      - name: Build NSIS installer
+        id: nsis
+        shell: pwsh
+        continue-on-error: true
+        env:
+          APP_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $env:Path = "C:\Program Files (x86)\NSIS;$env:Path"
+          wails3 package
+
+      - name: Prepare release assets
+        shell: pwsh
+        env:
+          APP_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          $assets = @("dist/crac-exam-v$env:APP_VERSION-windows-amd64.exe")
+          Copy-Item "bin/crac-exam-v3.exe" $assets[0]
+
+          $installer = "bin/crac-exam-v3-amd64-installer.exe"
+          if (Test-Path $installer) {
+            $installerAsset = "dist/crac-exam-v$env:APP_VERSION-windows-amd64-installer.exe"
+            Copy-Item $installer $installerAsset
+            $assets += $installerAsset
+          } else {
+            Write-Warning "NSIS installer was not produced; publishing portable executable only."
+          }
+
+          foreach ($asset in $assets) {
+            $hash = (Get-FileHash $asset -Algorithm SHA256).Hash.ToLower()
+            "$hash  $(Split-Path $asset -Leaf)" | Set-Content "$asset.sha256" -Encoding ascii
+            Get-Item $asset | Select-Object Name, Length
+            Get-Content "$asset.sha256"
+          }
+
+      - name: Upload release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: crac-exam-v${{ steps.version.outputs.version }}-windows-amd64
+          path: |
+            dist/*.exe
+            dist/*.sha256
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
+          generate_release_notes: true
+          prerelease: ${{ contains(steps.version.outputs.version, '-') }}
+          files: |
+            dist/*.exe
+            dist/*.sha256
